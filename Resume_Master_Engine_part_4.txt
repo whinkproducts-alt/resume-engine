@@ -1,0 +1,2186 @@
+================================================================================
+RESUME ENGINE — STAGE 4 / PHASE 1 — NEXT.JS 14 FRONTEND
+================================================================================
+Stack: Next.js 14 (App Router) · React 18 · TypeScript · Tailwind · TanStack Query
+Authoritative sign-offs applied:
+  • R18 filename regex: ^[a-zA-Z0-9\s\-_]+_[a-zA-Z0-9\s\-_]+_[a-zA-Z0-9\s\-_]+\.docx$
+  • R2  close variant  : 70% token overlap (stop words ignored)
+  • R9  LLM judged     : warn flag, non-blocking
+  • R10 duplicate verb : per-resume, warn severity
+  • 2FA                : POST /admin/2fa/enroll
+  • Bootstrap token    : X-Bootstrap-Token header
+================================================================================
+
+
+================================================================================
+SECTION 1 — TERMINAL SCAFFOLD COMMANDS
+================================================================================
+
+# 1. Create the project
+npx create-next-app@latest resume-engine \
+  --typescript \
+  --tailwind \
+  --app \
+  --src-dir \
+  --import-alias "@/*" \
+  --eslint \
+  --no-turbopack
+
+cd resume-engine
+
+# 2. Runtime deps
+npm install \
+  @tanstack/react-query \
+  @tanstack/react-query-devtools \
+  axios \
+  zod \
+  clsx \
+  tailwind-merge \
+  lucide-react \
+  react-dropzone \
+  date-fns
+
+# 3. Dev deps
+npm install -D \
+  @types/node \
+  @types/react \
+  @types/react-dom \
+  prettier \
+  prettier-plugin-tailwindcss
+
+# 4. Optional — Tailwind font/plugin helpers
+npm install -D @tailwindcss/forms
+
+# 5. Run dev server
+npm run dev
+
+
+================================================================================
+SECTION 2 — package.json (dependencies summary)
+================================================================================
+
+{
+  "name": "resume-engine",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.59.0",
+    "@tanstack/react-query-devtools": "^5.59.0",
+    "axios": "^1.7.0",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
+    "lucide-react": "^0.454.0",
+    "next": "14.2.15",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-dropzone": "^14.3.5",
+    "tailwind-merge": "^2.5.4",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/forms": "^0.5.9",
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "prettier": "^3.3.3",
+    "prettier-plugin-tailwindcss": "^0.6.8",
+    "tailwindcss": "^3.4.13",
+    "typescript": "^5"
+  }
+}
+
+
+================================================================================
+SECTION 3 — tailwind.config.ts
+================================================================================
+
+import type { Config } from "tailwindcss";
+
+const config: Config = {
+  content: ["./src/**/*.{ts,tsx,mdx}"],
+  theme: {
+    extend: {
+      colors: {
+        bg:        "var(--bg)",
+        "bg-2":    "var(--bg-2)",
+        "bg-3":    "var(--bg-3)",
+        surface:   "var(--surface)",
+        border:    "var(--border)",
+        fg:        "var(--fg)",
+        "fg-2":    "var(--fg-2)",
+        gold:      "var(--gold)",
+        "gold-2":  "var(--gold-2)",
+        success:   "var(--success)",
+        danger:    "var(--danger)",
+      },
+      fontFamily: {
+        sans: ["Outfit", "ui-sans-serif", "system-ui", "sans-serif"],
+        mono: ["DM Mono", "ui-monospace", "SFMono-Regular", "monospace"],
+      },
+      borderRadius: { xl: "0.875rem", "2xl": "1.125rem" },
+      boxShadow: {
+        card: "0 1px 0 rgba(255,255,255,0.04), 0 8px 24px rgba(0,0,0,0.45)",
+      },
+    },
+  },
+  plugins: [require("@tailwindcss/forms")],
+};
+
+export default config;
+
+
+================================================================================
+SECTION 4 — postcss.config.js
+================================================================================
+
+module.exports = { plugins: { tailwindcss: {}, autoprefixer: {} } };
+
+
+================================================================================
+SECTION 5 — src/app/globals.css
+================================================================================
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap");
+
+:root {
+  /* Design tokens — DO NOT OVERRIDE */
+  --bg:        #08090b;
+  --bg-2:      #10131a;
+  --bg-3:      #181c26;
+  --surface:   #1c2130;
+  --border:    rgba(255, 255, 255, 0.07);
+  --fg:        #edf0f5;
+  --fg-2:      #8e97aa;
+  --gold:      #d4a017;
+  --gold-2:    #f0c040;
+  --success:   #22c55e;
+  --danger:    #f05252;
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Outfit", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  border-color: var(--border);
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg-2); }
+::-webkit-scrollbar-thumb {
+  background: var(--bg-3);
+  border-radius: 8px;
+  border: 2px solid var(--bg-2);
+}
+::selection { background: rgba(212,160,23,0.35); color: #fff; }
+
+/* Utility baseline */
+.btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors;
+}
+.btn-primary { @apply bg-gold text-black hover:bg-gold-2; }
+.btn-ghost  { @apply text-fg-2 hover:bg-bg-3 hover:text-fg; }
+.btn-danger { @apply bg-danger text-white hover:bg-danger/90; }
+.btn-outline{ @apply border border-border text-fg hover:bg-bg-3; }
+
+.input {
+  @apply w-full rounded-lg border border-border bg-bg-2 px-3 py-2 text-sm text-fg
+         placeholder:text-fg-2/60 focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold/40;
+}
+
+.card { @apply rounded-xl border border-border bg-surface shadow-card; }
+
+.badge {
+  @apply inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide;
+}
+.badge-warn  { @apply border-gold/40 text-gold-2 bg-gold/10; }
+.badge-ok    { @apply border-success/40 text-success bg-success/10; }
+.badge-fail  { @apply border-danger/40 text-danger bg-danger/10; }
+.badge-idle  { @apply border-border text-fg-2 bg-bg-3; }
+
+
+================================================================================
+SECTION 6 — src/lib/types.ts
+================================================================================
+
+export type Role = "owner" | "admin" | "member";
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  agencyId: string;
+  twoFactorEnabled: boolean;
+}
+
+export interface Profile {
+  id: string;
+  name: string;
+  headline?: string;
+  baseResumeFileName?: string;
+  headerLocked: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Run {
+  id: string;
+  profileId: string;
+  profileName: string;
+  status: "queued" | "running" | "awaiting_confirm" | "review" | "completed" | "failed";
+  stageLabel?: string;
+  companyGuess?: { name: string; confidence: number; evidence: string[] };
+  jdSource: "paste" | "file" | "url";
+  createdAt: string;
+  completedAt?: string;
+}
+
+export type FlagSeverity = "warn" | "fail" | "info";
+export interface ValidationFlag {
+  id: string;
+  rule: string;       // e.g. "R2", "R9", "R10", "R18"
+  severity: FlagSeverity;
+  message: string;
+  sectionRef?: string;
+  bulletRef?: string;
+}
+
+export interface Bullet {
+  id: string;
+  text: string;
+  locked?: boolean;
+}
+
+export interface Section {
+  id: string;
+  title: string;
+  bullets: Bullet[];
+}
+
+export interface RunReview {
+  runId: string;
+  jd: string;
+  sections: Section[];
+  flags: ValidationFlag[];
+  downloadUrls: { docx: string; pdf: string };
+}
+
+export interface HistoryRow {
+  id: string;
+  profileName: string;
+  company: string;
+  status: Run["status"];
+  createdAt: string;
+  downloadUrl: string;
+}
+
+export interface AuditEntry {
+  id: string;
+  actor: string;
+  action: string;
+  target: string;
+  createdAt: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface Branding {
+  logoUrl?: string;
+  primaryColor: string;
+  footerText: string;
+}
+
+export interface Settings {
+  accuracyToggles: Record<string, boolean>; // keyed by toggle id
+  theme: "dark" | "light";                   // dark locked, kept for future
+}
+
+
+================================================================================
+SECTION 7 — src/lib/api.ts
+================================================================================
+
+"use client";
+
+let accessToken: string | null = null;
+
+export function setAccessToken(token: string | null) {
+  accessToken = token;
+}
+
+export function getAccessToken() {
+  return accessToken;
+}
+
+async function tryRefresh(): Promise<string | null> {
+  try {
+    const res = await fetch("/api/auth/refresh", {
+      method: "POST",
+      credentials: "include",
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { accessToken?: string };
+    if (data.accessToken) {
+      accessToken = data.accessToken;
+      return data.accessToken;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export interface ApiOptions extends RequestInit {
+  retryOn401?: boolean;
+  extraHeaders?: Record<string, string>;
+}
+
+export async function apiFetch<T>(path: string, opts: ApiOptions = {}): Promise<T> {
+  const { retryOn401 = true, extraHeaders, ...init } = opts;
+
+  const doFetch = (token: string | null) => {
+    const headers = new Headers(init.headers || {});
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+    if (extraHeaders) {
+      for (const [k, v] of Object.entries(extraHeaders)) headers.set(k, v);
+    }
+    return fetch(path, { ...init, headers, credentials: "include" });
+  };
+
+  let res = await doFetch(accessToken);
+  if (res.status === 401 && retryOn401) {
+    const refreshed = await tryRefresh();
+    if (refreshed) res = await doFetch(refreshed);
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw Object.assign(new Error(text || `Request failed (${res.status})`), {
+      status: res.status,
+    });
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+/* Convenience wrappers */
+export const api = {
+  get: <T>(p: string, opts?: ApiOptions) => apiFetch<T>(p, { ...opts, method: "GET" }),
+  post: <T>(p: string, body?: unknown, opts?: ApiOptions) =>
+    apiFetch<T>(p, {
+      ...opts,
+      method: "POST",
+      body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
+    }),
+  patch: <T>(p: string, body?: unknown, opts?: ApiOptions) =>
+    apiFetch<T>(p, {
+      ...opts,
+      method: "PATCH",
+      body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
+    }),
+  del: <T>(p: string, opts?: ApiOptions) => apiFetch<T>(p, { ...opts, method: "DELETE" }),
+};
+
+/* SSE / polling helper for run progress */
+export function subscribeRunProgress(
+  runId: string,
+  onEvent: (data: { stage: string; status: Run["status"] }) => void
+): () => void {
+  // Prefer SSE if available; fall back to polling every 2s.
+  let closed = false;
+  let es: EventSource | null = null;
+  let interval: ReturnType<typeof setInterval> | null = null;
+
+  const startPolling = () => {
+    interval = setInterval(async () => {
+      if (closed) return;
+      try {
+        const r = await api.get<{ status: Run["status"]; stageLabel?: string }>(
+          `/api/runs/${runId}`
+        );
+        onEvent({ stage: r.stageLabel || "", status: r.status });
+        if (r.status === "review" || r.status === "completed" || r.status === "failed") {
+          cleanup();
+        }
+      } catch {
+        /* noop — keep polling */
+      }
+    }, 2000);
+  };
+
+  try {
+    es = new EventSource(`/api/runs/${runId}/stream`);
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data) as { stage: string; status: Run["status"] };
+        onEvent(data);
+        if (data.status === "review" || data.status === "completed" || data.status === "failed") {
+          cleanup();
+        }
+      } catch {
+        /* ignore malformed */
+      }
+    };
+    es.onerror = () => {
+      es?.close();
+      es = null;
+      if (!closed) startPolling();
+    };
+  } catch {
+    startPolling();
+  }
+
+  const cleanup = () => {
+    closed = true;
+    es?.close();
+    if (interval) clearInterval(interval);
+  };
+
+  return cleanup;
+}
+
+
+================================================================================
+SECTION 8 — src/lib/auth.tsx
+================================================================================
+
+"use client";
+
+import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { api, setAccessToken } from "./api";
+import type { User } from "./types";
+
+interface AuthContextValue {
+  user: User | null;
+  loading: boolean;
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
+  refresh: () => Promise<void>;
+}
+
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await api.post<{ accessToken: string; user: User }>("/api/auth/refresh");
+      setAccessToken(res.accessToken);
+      setUser(res.user);
+    } catch {
+      setAccessToken(null);
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const login = useCallback(async (email: string, password: string) => {
+    const res = await api.post<{ accessToken: string; user: User }>("/api/auth/login", {
+      email,
+      password,
+    });
+    setAccessToken(res.accessToken);
+    setUser(res.user);
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await api.post("/api/auth/logout");
+    } finally {
+      setAccessToken(null);
+      setUser(null);
+    }
+  }, []);
+
+  return (
+    <AuthContext.Provider value={{ user, loading, login, logout, refresh }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error("useAuth must be used inside <AuthProvider>");
+  return ctx;
+}
+
+
+================================================================================
+SECTION 9 — src/components/providers.tsx
+================================================================================
+
+"use client";
+
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
+import { useState } from "react";
+import { AuthProvider } from "@/lib/auth";
+
+export function Providers({ children }: { children: React.ReactNode }) {
+  const [qc] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: { staleTime: 30_000, refetchOnWindowFocus: false, retry: 1 },
+          mutations: { retry: 0 },
+        },
+      })
+  );
+
+  return (
+    <QueryClientProvider client={qc}>
+      <AuthProvider>{children}</AuthProvider>
+      {process.env.NODE_ENV === "development" && <ReactQueryDevtools initialIsOpen={false} />}
+    </QueryClientProvider>
+  );
+}
+
+
+================================================================================
+SECTION 10 — src/app/layout.tsx  (ROOT LAYOUT)
+================================================================================
+
+import type { Metadata } from "next";
+import "./globals.css";
+import { Providers } from "@/components/providers";
+
+export const metadata: Metadata = {
+  title: "Resume Engine — Whink Apps",
+  description: "Deterministic résumé tailoring engine.",
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en" className="dark">
+      <body className="min-h-screen bg-bg text-fg antialiased">
+        <Providers>{children}</Providers>
+      </body>
+    </html>
+  );
+}
+
+
+================================================================================
+SECTION 11 — src/components/ui.tsx  (shared primitives)
+================================================================================
+
+"use client";
+
+import { clsx } from "clsx";
+import { Loader2 } from "lucide-react";
+import type { ButtonHTMLAttributes, InputHTMLAttributes, HTMLAttributes } from "react";
+
+export function Button({
+  variant = "primary",
+  loading,
+  className,
+  children,
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: "primary" | "ghost" | "outline" | "danger";
+  loading?: boolean;
+}) {
+  const map = {
+    primary: "btn-primary",
+    ghost:   "btn-ghost",
+    outline: "btn-outline",
+    danger:  "btn-danger",
+  };
+  return (
+    <button
+      {...props}
+      disabled={props.disabled || loading}
+      className={clsx("btn", map[variant], className, "disabled:cursor-not-allowed disabled:opacity-50")}
+    >
+      {loading && <Loader2 size={14} className="animate-spin" />}
+      {children}
+    </button>
+  );
+}
+
+export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
+  return <input {...props} className={clsx("input", props.className)} />;
+}
+
+export function Card(props: HTMLAttributes<HTMLDivElement>) {
+  return <div {...props} className={clsx("card", props.className)} />;
+}
+
+export function Badge({
+  children,
+  tone = "idle",
+}: {
+  children: React.ReactNode;
+  tone?: "warn" | "ok" | "fail" | "idle";
+}) {
+  const map = { warn: "badge-warn", ok: "badge-ok", fail: "badge-fail", idle: "badge-idle" };
+  return <span className={clsx("badge", map[tone])}>{children}</span>;
+}
+
+export function EmptyState({
+  title,
+  description,
+  action,
+}: {
+  title: string;
+  description?: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-bg-2 px-8 py-16 text-center">
+      <div className="mb-3 h-12 w-12 rounded-full bg-gold/10 ring-1 ring-gold/30" />
+      <h3 className="text-lg font-semibold text-fg">{title}</h3>
+      {description && <p className="mt-1 max-w-md text-sm text-fg-2">{description}</p>}
+      {action && <div className="mt-5">{action}</div>}
+    </div>
+  );
+}
+
+export function Spinner({ className }: { className?: string }) {
+  return <Loader2 className={clsx("animate-spin text-fg-2", className)} size={18} />;
+}
+
+export function Skeleton({ className }: { className?: string }) {
+  return <div className={clsx("animate-pulse rounded-md bg-bg-3", className)} />;
+}
+
+
+================================================================================
+SECTION 12 — src/components/app-shell.tsx  (sidebar + shell used by (app) layout)
+================================================================================
+
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import {
+  LayoutDashboard, UserSquare2, FilePlus2, History, Settings, Building2,
+  Shield, LogOut,
+} from "lucide-react";
+import { useAuth } from "@/lib/auth";
+import { clsx } from "clsx";
+
+const NAV = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/profiles",  label: "Profiles",  icon: UserSquare2 },
+  { href: "/new",       label: "New run",   icon: FilePlus2 },
+  { href: "/history",   label: "History",   icon: History },
+  { href: "/settings",  label: "Settings",  icon: Settings },
+  { href: "/agency-branding", label: "Agency", icon: Building2 },
+];
+
+const ADMIN_NAV = [
+  { href: "/admin/users",     label: "Users",     icon: Shield },
+  { href: "/admin/runs",      label: "Runs",      icon: History },
+  { href: "/admin/audit",     label: "Audit",     icon: Shield },
+  { href: "/admin/reproduce", label: "Reproduce", icon: History },
+];
+
+export function AppShell({ children, admin = false }: { children: React.ReactNode; admin?: boolean }) {
+  const pathname = usePathname();
+  const { user, logout } = useAuth();
+  const items = admin ? ADMIN_NAV : NAV;
+
+  return (
+    <div className="flex min-h-screen bg-bg">
+      <aside className="sticky top-0 flex h-screen w-60 flex-col border-r border-border bg-bg-2">
+        <div className="flex h-16 items-center gap-2 border-b border-border px-5">
+          <div className="h-7 w-7 rounded-md bg-gradient-to-br from-gold to-gold-2" />
+          <span className="font-semibold tracking-tight">Resume Engine</span>
+        </div>
+
+        <nav className="flex-1 space-y-1 p-3">
+          {items.map(({ href, label, icon: Icon }) => {
+            const active = pathname === href || pathname.startsWith(href + "/");
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={clsx(
+                  "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                  active
+                    ? "bg-bg-3 text-fg"
+                    : "text-fg-2 hover:bg-bg-3/60 hover:text-fg"
+                )}
+              >
+                <Icon size={16} />
+                {label}
+              </Link>
+            );
+          })}
+        </nav>
+
+        <div className="border-t border-border p-3">
+          <div className="mb-2 truncate text-xs text-fg-2">
+            {user?.name ?? "—"} <span className="text-fg-2/60">· {user?.role}</span>
+          </div>
+          <button
+            onClick={() => void logout()}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-fg-2 hover:bg-bg-3 hover:text-fg"
+          >
+            <LogOut size={14} /> Sign out
+          </button>
+        </div>
+      </aside>
+
+      <main className="flex-1">
+        <div className="mx-auto max-w-6xl px-8 py-10">{children}</div>
+      </main>
+    </div>
+  );
+}
+
+
+================================================================================
+SECTION 13 — src/app/(app)/layout.tsx
+================================================================================
+
+"use client";
+
+import { AppShell } from "@/components/app-shell";
+import { useAuth } from "@/lib/auth";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
+
+export default function AppLayout({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!loading && !user) router.replace("/login");
+  }, [loading, user, router]);
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center text-fg-2">Loading…</div>
+    );
+  }
+  if (!user) return null;
+
+  return <AppShell>{children}</AppShell>;
+}
+
+
+================================================================================
+SECTION 14 — src/app/(admin)/layout.tsx
+================================================================================
+
+"use client";
+
+import { AppShell } from "@/components/app-shell";
+import { useAuth } from "@/lib/auth";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
+
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!loading) {
+      if (!user) router.replace("/login");
+      else if (user.role !== "admin" && user.role !== "owner") router.replace("/dashboard");
+    }
+  }, [loading, user, router]);
+
+  if (loading || !user) {
+    return <div className="flex min-h-screen items-center justify-center text-fg-2">Loading…</div>;
+  }
+  return <AppShell admin>{children}</AppShell>;
+}
+
+
+================================================================================
+SCREEN 01 — /(app)/dashboard
+================================================================================
+
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
+import { api } from "@/lib/api";
+import { Card, EmptyState, Button, Skeleton, Badge } from "@/components/ui";
+import type { Run } from "@/lib/types";
+import { formatDistanceToNow } from "date-fns";
+
+export default function DashboardPage() {
+  const { data, isLoading } = useQuery({
+    queryKey: ["runs", "recent"],
+    queryFn: () => api.get<{ items: Run[] }>("/api/runs?limit=5"),
+  });
+
+  const runs = data?.items ?? [];
+
+  return (
+    <div className="space-y-8">
+      <header className="flex items-end justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+          <p className="mt-1 text-sm text-fg-2">Your recent tailoring runs.</p>
+        </div>
+        <Link href="/new"><Button>New run</Button></Link>
+      </header>
+
+      {isLoading ? (
+        <div className="space-y-3">
+          <Skeleton className="h-24" />
+          <Skeleton className="h-24" />
+          <Skeleton className="h-24" />
+        </div>
+      ) : runs.length === 0 ? (
+        <EmptyState
+          title="No runs yet"
+          description="Start by creating a profile and generating your first tailored résumé."
+          action={<Link href="/new"><Button>Create your first run</Button></Link>}
+        />
+      ) : (
+        <div className="grid gap-3">
+          {runs.map((r) => (
+            <Link key={r.id} href={`/runs/${r.id}`}>
+              <Card className="flex items-center justify-between p-5 transition-colors hover:bg-bg-3">
+                <div>
+                  <div className="font-medium">{r.profileName} — {r.companyGuess?.name ?? "—"}</div>
+                  <div className="mt-1 text-xs text-fg-2">
+                    {formatDistanceToNow(new Date(r.createdAt), { addSuffix: true })}
+                  </div>
+                </div>
+                <Badge tone={r.status === "review" ? "ok" : r.status === "failed" ? "fail" : "idle"}>
+                  {r.status}
+                </Badge>
+              </Card>
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+================================================================================
+SCREEN 02 — /(app)/profiles
+================================================================================
+
+"use client";
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
+import { useState } from "react";
+import { api } from "@/lib/api";
+import { Button, Card, EmptyState, Input, Skeleton } from "@/components/ui";
+import type { Profile } from "@/lib/types";
+
+export default function ProfilesPage() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({
+    queryKey: ["profiles"],
+    queryFn: () => api.get<{ items: Profile[] }>("/api/profiles"),
+  });
+
+  const [name, setName] = useState("");
+  const create = useMutation({
+    mutationFn: () => api.post<Profile>("/api/profiles", { name }),
+    onSuccess: () => {
+      setName("");
+      void qc.invalidateQueries({ queryKey: ["profiles"] });
+    },
+  });
+
+  const items = data?.items ?? [];
+
+  return (
+    <div className="space-y-8">
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight">Profiles</h1>
+        <p className="mt-1 text-sm text-fg-2">Each profile holds one base résumé and a locked header.</p>
+      </header>
+
+      <Card className="flex gap-2 p-4">
+        <Input
+          placeholder="New profile name (e.g. Senior Backend — 2025)"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <Button loading={create.isPending} onClick={() => name.trim() && create.mutate()}>
+          Create
+        </Button>
+      </Card>
+
+      {isLoading ? (
+        <div className="space-y-2"><Skeleton className="h-16" /><Skeleton className="h-16" /></div>
+      ) : items.length === 0 ? (
+        <EmptyState title="No profiles" description="Create a profile to upload your base résumé." />
+      ) : (
+        <div className="grid gap-3">
+          {items.map((p) => (
+            <Link key={p.id} href={`/profiles/${p.id}`}>
+              <Card className="flex items-center justify-between p-5 hover:bg-bg-3">
+                <div>
+                  <div className="font-medium">{p.name}</div>
+                  <div className="mt-1 text-xs text-fg-2">
+                    {p.baseResumeFileName ?? "No base résumé uploaded"}
+                  </div>
+                </div>
+                <span className="text-xs text-fg-2">{p.headerLocked ? "Header locked" : "Header unlocked"}</span>
+              </Card>
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+================================================================================
+SCREEN 03 — /(app)/profiles/[id]
+================================================================================
+
+"use client";
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useParams } from "next/navigation";
+import { useCallback } from "react";
+import { useDropzone } from "react-dropzone";
+import { UploadCloud, Lock, Unlock } from "lucide-react";
+import { api } from "@/lib/api";
+import { Button, Card, Input, Skeleton } from "@/components/ui";
+import type { Profile } from "@/lib/types";
+import { useState, useEffect } from "react";
+
+export default function ProfileDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const qc = useQueryClient();
+
+  const { data: profile, isLoading } = useQuery({
+    queryKey: ["profile", id],
+    queryFn: () => api.get<Profile>(`/api/profiles/${id}`),
+  });
+
+  const [name, setName] = useState("");
+  useEffect(() => { if (profile) setName(profile.name); }, [profile]);
+
+  const update = useMutation({
+    mutationFn: (patch: Partial<Profile>) => api.patch<Profile>(`/api/profiles/${id}`, patch),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["profile", id] }),
+  });
+
+  const upload = useMutation({
+    mutationFn: (file: File) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      return api.post<Profile>(`/api/profiles/${id}/resume`, fd);
+    },
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["profile", id] }),
+  });
+
+  const onDrop = useCallback((files: File[]) => {
+    if (files[0]) upload.mutate(files[0]);
+  }, [upload]);
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: {
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+      "application/pdf": [".pdf"],
+    },
+    maxFiles: 1,
+  });
+
+  if (isLoading || !profile) {
+    return <div className="space-y-4"><Skeleton className="h-8 w-64" /><Skeleton className="h-40" /></div>;
+  }
+
+  return (
+    <div className="space-y-8">
+      <header className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">{profile.name}</h1>
+          <p className="mt-1 text-sm text-fg-2">Manage base résumé and header lock.</p>
+        </div>
+        <Button
+          variant="outline"
+          onClick={() => update.mutate({ headerLocked: !profile.headerLocked })}
+        >
+          {profile.headerLocked ? <Lock size={14} /> : <Unlock size={14} />}
+          {profile.headerLocked ? "Unlock header" : "Lock header"}
+        </Button>
+      </header>
+
+      <Card className="space-y-4 p-6">
+        <div className="space-y-2">
+          <label className="text-xs uppercase tracking-wide text-fg-2">Profile name</label>
+          <Input value={name} onChange={(e) => setName(e.target.value)} />
+          <Button variant="outline" onClick={() => update.mutate({ name })}>Save</Button>
+        </div>
+      </Card>
+
+      <Card className="p-6">
+        <h2 className="mb-3 text-sm font-medium text-fg">Base résumé</h2>
+        <div
+          {...getRootProps()}
+          className="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-border bg-bg-2 px-6 py-10 text-center transition-colors hover:border-gold/40"
+        >
+          <input {...getInputProps()} />
+          <UploadCloud className="mb-3 text-fg-2" />
+          <p className="text-sm text-fg">
+            {isDragActive ? "Drop the file…" : "Drag & drop a .docx or .pdf, or click to browse"}
+          </p>
+          {profile.baseResumeFileName && (
+            <p className="mt-2 text-xs text-fg-2">Current: {profile.baseResumeFileName}</p>
+          )}
+          {upload.isPending && <p className="mt-2 text-xs text-gold-2">Uploading…</p>}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+
+================================================================================
+SCREEN 04 — /(app)/new
+================================================================================
+
+"use client";
+
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { api } from "@/lib/api";
+import { Button, Card, Input } from "@/components/ui";
+import type { Profile, Run } from "@/lib/types";
+import { clsx } from "clsx";
+
+type Tab = "paste" | "file" | "url";
+
+export default function NewRunPage() {
+  const router = useRouter();
+  const { data: profiles } = useQuery({
+    queryKey: ["profiles"],
+    queryFn: () => api.get<{ items: Profile[] }>("/api/profiles"),
+  });
+
+  const [profileId, setProfileId] = useState("");
+  const [tab, setTab] = useState<Tab>("paste");
+  const [jdText, setJdText] = useState("");
+  const [jdUrl, setJdUrl] = useState("");
+  const [jdFile, setJdFile] = useState<File | null>(null);
+
+  const create = useMutation({
+    mutationFn: async () => {
+      if (tab === "file" && jdFile) {
+        const fd = new FormData();
+        fd.append("profileId", profileId);
+        fd.append("jdFile", jdFile);
+        fd.append("jdSource", "file");
+        return api.post<Run>("/api/runs", fd);
+      }
+      return api.post<Run>("/api/runs", {
+        profileId,
+        jdSource: tab,
+        jd: tab === "paste" ? jdText : undefined,
+        jdUrl: tab === "url" ? jdUrl : undefined,
+      });
+    },
+    onSuccess: (run) => router.push(`/runs/${run.id}`),
+  });
+
+  const canSubmit =
+    !!profileId &&
+    ((tab === "paste" && jdText.trim().length > 40) ||
+      (tab === "url" && /^https?:\/\//.test(jdUrl)) ||
+      (tab === "file" && !!jdFile));
+
+  return (
+    <div className="space-y-8">
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight">New run</h1>
+        <p className="mt-1 text-sm text-fg-2">Pick a profile, paste the JD, and generate.</p>
+      </header>
+
+      <Card className="space-y-6 p-6">
+        <div>
+          <label className="mb-2 block text-xs uppercase tracking-wide text-fg-2">Profile</label>
+          <select
+            value={profileId}
+            onChange={(e) => setProfileId(e.target.value)}
+            className="input"
+          >
+            <option value="">Select a profile…</option>
+            {profiles?.items.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <div className="mb-3 flex gap-1 rounded-lg border border-border bg-bg-2 p-1 text-sm">
+            {(["paste", "file", "url"] as Tab[]).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={clsx(
+                  "flex-1 rounded-md px-3 py-1.5 capitalize transition-colors",
+                  tab === t ? "bg-bg-3 text-fg" : "text-fg-2 hover:text-fg"
+                )}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+
+          {tab === "paste" && (
+            <textarea
+              className="input min-h-[220px] resize-y font-mono text-[13px]"
+              placeholder="Paste the job description here…"
+              value={jdText}
+              onChange={(e) => setJdText(e.target.value)}
+            />
+          )}
+
+          {tab === "file" && (
+            <div className="rounded-xl border border-dashed border-border bg-bg-2 p-6 text-center">
+              <input
+                type="file"
+                accept=".pdf,.docx,.txt"
+                onChange={(e) => setJdFile(e.target.files?.[0] ?? null)}
+                className="mx-auto block text-sm text-fg-2"
+              />
+              {jdFile && <p className="mt-2 text-xs text-gold-2">{jdFile.name}</p>}
+            </div>
+          )}
+
+          {tab === "url" && (
+            <Input
+              placeholder="https://…"
+              value={jdUrl}
+              onChange={(e) => setJdUrl(e.target.value)}
+            />
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="primary"
+            disabled={!canSubmit}
+            loading={create.isPending}
+            onClick={() => create.mutate()}
+          >
+            Generate
+          </Button>
+        </div>
+
+        {create.isError && (
+          <p className="text-sm text-danger">{(create.error as Error).message}</p>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+
+================================================================================
+SCREEN 05 — /(app)/runs/[id]  (progress via SSE / polling)
+================================================================================
+
+"use client";
+
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useParams, useRouter } from "next/navigation";
+import { api, subscribeRunProgress } from "@/lib/api";
+import { Badge, Card, Spinner } from "@/components/ui";
+import type { Run } from "@/lib/types";
+
+const STAGES = [
+  "Ingest JD",
+  "Parse profile",
+  "Draft sections",
+  "Validate",
+  "Render",
+];
+
+export default function RunProgressPage() {
+  const { id } = useParams<{ id: string }>();
+  const router = useRouter();
+
+  const { data: run } = useQuery({
+    queryKey: ["run", id],
+    queryFn: () => api.get<Run>(`/api/runs/${id}`),
+    refetchOnMount: "always",
+  });
+
+  const [status, setStatus] = useState<Run["status"]>("queued");
+  const [stage, setStage] = useState("");
+
+  useEffect(() => {
+    if (!id) return;
+    const stop = subscribeRunProgress(id, (evt) => {
+      setStatus(evt.status);
+      setStage(evt.stage);
+      if (evt.status === "review") router.replace(`/runs/${id}/review`);
+      if (evt.status === "failed") router.replace(`/runs/${id}`);
+    });
+    return () => stop();
+  }, [id, router]);
+
+  const activeIdx = Math.max(0, STAGES.findIndex((s) => stage.toLowerCase().includes(s.toLowerCase())));
+
+  return (
+    <div className="space-y-8">
+      <header className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Run {id.slice(0, 8)}</h1>
+          <p className="mt-1 text-sm text-fg-2">
+            {run?.profileName ? `Profile: ${run.profileName}` : "Generating your résumé…"}
+          </p>
+        </div>
+        <Badge tone={status === "failed" ? "fail" : status === "review" ? "ok" : "idle"}>
+          {status}
+        </Badge>
+      </header>
+
+      <Card className="space-y-4 p-6">
+        {STAGES.map((label, i) => {
+          const done = i < activeIdx || status === "review";
+          const active = i === activeIdx && status !== "review";
+          return (
+            <div key={label} className="flex items-center gap-3 text-sm">
+              <div
+                className={
+                  "flex h-6 w-6 items-center justify-center rounded-full border text-[11px] " +
+                  (done
+                    ? "border-success/40 bg-success/10 text-success"
+                    : active
+                    ? "border-gold/40 bg-gold/10 text-gold-2"
+                    : "border-border bg-bg-3 text-fg-2")
+                }
+              >
+                {done ? "✓" : i + 1}
+              </div>
+              <span className={done ? "text-fg" : active ? "text-gold-2" : "text-fg-2"}>
+                {label}
+              </span>
+              {active && <Spinner className="ml-auto" />}
+            </div>
+          );
+        })}
+      </Card>
+    </div>
+  );
+}
+
+
+================================================================================
+SCREEN 06 — /(app)/runs/[id]/confirm
+================================================================================
+
+"use client";
+
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useParams, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
+import { Button, Card, Input } from "@/components/ui";
+import type { Run } from "@/lib/types";
+
+export default function ConfirmCompanyPage() {
+  const { id } = useParams<{ id: string }>();
+  const router = useRouter();
+
+  const { data: run } = useQuery({
+    queryKey: ["run", id],
+    queryFn: () => api.get<Run>(`/api/runs/${id}`),
+  });
+
+  const [company, setCompany] = useState("");
+  useEffect(() => {
+    if (run?.companyGuess?.name) setCompany(run.companyGuess.name);
+  }, [run]);
+
+  const confirm = useMutation({
+    mutationFn: () =>
+      api.post<Run>(`/api/runs/${id}/confirm-company`, { company }),
+    onSuccess: () => router.replace(`/runs/${id}/review`),
+  });
+
+  return (
+    <div className="space-y-8">
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight">Confirm company</h1>
+        <p className="mt-1 text-sm text-fg-2">
+          We inferred the company from the JD. Adjust if needed.
+        </p>
+      </header>
+
+      <Card className="space-y-4 p-6">
+        <div>
+          <label className="mb-2 block text-xs uppercase tracking-wide text-fg-2">Company</label>
+          <Input value={company} onChange={(e) => setCompany(e.target.value)} />
+        </div>
+
+        {run?.companyGuess?.evidence?.length ? (
+          <div className="rounded-lg bg-bg-2 p-4">
+            <div className="mb-2 text-xs uppercase tracking-wide text-fg-2">Evidence</div>
+            <ul className="list-disc space-y-1 pl-5 text-sm text-fg-2">
+              {run.companyGuess.evidence.map((e, i) => (
+                <li key={i}>{e}</li>
+              ))}
+            </ul>
+            <div className="mt-2 text-xs text-fg-2/70">
+              Confidence: {(run.companyGuess.confidence * 100).toFixed(0)}%
+            </div>
+          </div>
+        ) : null}
+
+        <div className="flex justify-end">
+          <Button loading={confirm.isPending} disabled={!company.trim()} onClick={() => confirm.mutate()}>
+            Confirm & continue
+          </Button>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+
+================================================================================
+SCREEN 07 — /(app)/runs/[id]/review  (two-pane)
+================================================================================
+
+"use client";
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useParams } from "next/navigation";
+import { useState } from "react";
+import { Download, RefreshCw, Pencil } from "lucide-react";
+import { api } from "@/lib/api";
+import { Badge, Button, Card, Spinner } from "@/components/ui";
+import type { Bullet, RunReview, Section, ValidationFlag } from "@/lib/types";
+
+export default function ReviewRunPage() {
+  const { id } = useParams<{ id: string }>();
+  const qc = useQueryClient();
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["review", id],
+    queryFn: () => api.get<RunReview>(`/api/runs/${id}/review`),
+  });
+
+  if (isLoading || !data) {
+    return <div className="flex h-96 items-center justify-center"><Spinner /></div>;
+  }
+
+  return (
+    <div className="space-y-6">
+      <header className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Review</h1>
+          <p className="mt-1 text-sm text-fg-2">Edit bullets inline, regenerate per section, then download.</p>
+        </div>
+        <div className="flex gap-2">
+          <a href={data.downloadUrls.docx} download>
+            <Button variant="outline"><Download size={14} /> DOCX</Button>
+          </a>
+          <a href={data.downloadUrls.pdf} download>
+            <Button variant="outline"><Download size={14} /> PDF</Button>
+          </a>
+        </div>
+      </header>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {/* LEFT: JD */}
+        <Card className="p-5">
+          <h2 className="mb-3 text-sm font-semibold text-fg">Job description</h2>
+          <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap text-[13px] leading-relaxed text-fg-2">
+            {data.jd}
+          </pre>
+        </Card>
+
+        {/* RIGHT: Résumé + validator */}
+        <div className="space-y-4">
+          <Card className="p-5">
+            <h2 className="mb-3 text-sm font-semibold text-fg">Tailored résumé</h2>
+            <div className="max-h-[55vh] space-y-6 overflow-auto pr-2">
+              {data.sections.map((s) => (
+                <SectionEditor key={s.id} runId={id} section={s} onMutate={() =>
+                  qc.invalidateQueries({ queryKey: ["review", id] })} />
+              ))}
+            </div>
+          </Card>
+
+          <Card className="p-5">
+            <h2 className="mb-3 text-sm font-semibold text-fg">Validator</h2>
+            {data.flags.length === 0 ? (
+              <Badge tone="ok">No flags</Badge>
+            ) : (
+              <ul className="space-y-2">
+                {data.flags.map((f) => <FlagRow key={f.id} flag={f} />)}
+              </ul>
+            )}
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SectionEditor({
+  runId, section, onMutate,
+}: { runId: string; section: Section; onMutate: () => void }) {
+  const regen = useMutation({
+    mutationFn: () => api.post(`/api/runs/${runId}/sections/${section.id}/regenerate`),
+    onSuccess: onMutate,
+  });
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-gold-2">
+          {section.title}
+        </h3>
+        <Button variant="ghost" onClick={() => regen.mutate()} loading={regen.isPending}>
+          <RefreshCw size={12} /> Regenerate
+        </Button>
+      </div>
+      <ul className="space-y-2">
+        {section.bullets.map((b) => (
+          <BulletRow key={b.id} runId={runId} bullet={b} onMutate={onMutate} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function BulletRow({ runId, bullet, onMutate }: { runId: string; bullet: Bullet; onMutate: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(bullet.text);
+
+  const save = useMutation({
+    mutationFn: () => api.patch(`/api/runs/${runId}/bullets/${bullet.id}`, { text }),
+    onSuccess: () => { setEditing(false); onMutate(); },
+  });
+
+  return (
+    <li className="group rounded-lg border border-border bg-bg-2 p-3 text-[13px] leading-relaxed text-fg">
+      {editing ? (
+        <div className="space-y-2">
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            className="input min-h-[70px] font-mono text-[12px]"
+          />
+          <div className="flex gap-2">
+            <Button onClick={() => save.mutate()} loading={save.isPending}>Save</Button>
+            <Button variant="ghost" onClick={() => { setEditing(false); setText(bullet.text); }}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <span className="flex-1">{bullet.text}</span>
+          <button
+            onClick={() => setEditing(true)}
+            className="opacity-0 transition-opacity group-hover:opacity-100"
+            aria-label="Edit bullet"
+          >
+            <Pencil size={12} className="text-fg-2" />
+          </button>
+        </div>
+      )}
+    </li>
+  );
+}
+
+function FlagRow({ flag }: { flag: ValidationFlag }) {
+  const tone = flag.severity === "fail" ? "fail" : flag.severity === "warn" ? "warn" : "idle";
+  return (
+    <li className="flex items-start gap-2 text-sm">
+      <Badge tone={tone as "fail" | "warn" | "idle"}>{flag.rule}</Badge>
+      <span className="text-fg-2">{flag.message}</span>
+    </li>
+  );
+}
+
+
+================================================================================
+SCREEN 08 — /(app)/history
+================================================================================
+
+"use client";
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { Download, Copy } from "lucide-react";
+import { api } from "@/lib/api";
+import { Badge, Button, Card, Input, Skeleton } from "@/components/ui";
+import type { HistoryRow } from "@/lib/types";
+import { format } from "date-fns";
+
+export default function HistoryPage() {
+  const qc = useQueryClient();
+  const [q, setQ] = useState("");
+  const [status, setStatus] = useState("");
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["history", q, status],
+    queryFn: () =>
+      api.get<{ items: HistoryRow[] }>(
+        `/api/runs?${new URLSearchParams({ ...(q && { q }), ...(status && { status }) })}`
+      ),
+  });
+
+  const duplicate = useMutation({
+    mutationFn: (id: string) => api.post<{ id: string }>(`/api/runs/${id}/duplicate`),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["history"] }),
+  });
+
+  const rows = data?.items ?? [];
+
+  return (
+    <div className="space-y-6">
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight">History</h1>
+        <p className="mt-1 text-sm text-fg-2">All tailoring runs, filterable and re-runnable.</p>
+      </header>
+
+      <Card className="flex flex-wrap gap-2 p-3">
+        <Input
+          placeholder="Search by profile or company…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          className="max-w-xs"
+        />
+        <select className="input max-w-[180px]" value={status} onChange={(e) => setStatus(e.target.value)}>
+          <option value="">All statuses</option>
+          <option value="completed">Completed</option>
+          <option value="review">Review</option>
+          <option value="failed">Failed</option>
+        </select>
+      </Card>
+
+      <Card className="overflow-hidden">
+        {isLoading ? (
+          <div className="p-4 space-y-2"><Skeleton className="h-10" /><Skeleton className="h-10" /></div>
+        ) : rows.length === 0 ? (
+          <div className="p-8 text-center text-sm text-fg-2">No runs match.</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-bg-2 text-left text-xs uppercase tracking-wide text-fg-2">
+              <tr>
+                <th className="px-4 py-3">Profile</th>
+                <th className="px-4 py-3">Company</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Created</th>
+                <th className="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {rows.map((r) => (
+                <tr key={r.id} className="hover:bg-bg-3/40">
+                  <td className="px-4 py-3">{r.profileName}</td>
+                  <td className="px-4 py-3 text-fg-2">{r.company || "—"}</td>
+                  <td className="px-4 py-3">
+                    <Badge tone={r.status === "failed" ? "fail" : r.status === "review" ? "ok" : "idle"}>
+                      {r.status}
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-3 text-xs text-fg-2">
+                    {format(new Date(r.createdAt), "MMM d, yyyy HH:mm")}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="inline-flex gap-1">
+                      <a href={r.downloadUrl} download>
+                        <Button variant="ghost"><Download size={14} /></Button>
+                      </a>
+                      <Button variant="ghost" onClick={() => duplicate.mutate(r.id)}>
+                        <Copy size={14} />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+
+================================================================================
+SCREEN 09 — /(app)/settings  (10 accuracy toggles + theme + account)
+================================================================================
+
+"use client";
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import { Button, Card, Spinner } from "@/components/ui";
+import type { Settings } from "@/lib/types";
+import { useAuth } from "@/lib/auth";
+
+/* Authoritative toggles — R-rules are mapped to explicit switches. */
+const TOGGLES: { key: string; label: string; hint: string }[] = [
+  { key: "r2_title_close_variant",  label: "R2 · Title close-variant match", hint: "70% token overlap, ignores stop words." },
+  { key: "r9_llm_judged",           label: "R9 · LLM-judged flags",          hint: "Records `warn`, non-blocking." },
+  { key: "r10_duplicate_verb",      label: "R10 · Duplicate verb",           hint: "Per-résumé warning, non-blocking." },
+  { key: "r18_filename_regex",      label: "R18 · Strict filename regex",    hint: "Enforces First_Last_Role.docx pattern." },
+  { key: "evidence_required",       label: "Evidence required",              hint: "Every bullet needs JD or profile evidence." },
+  { key: "header_lock",             label: "Header lock",                    hint: "Never mutate profile header block." },
+  { key: "company_confirmation",    label: "Company confirmation",           hint: "Ask user to confirm inferred company." },
+  { key: "keyword_density_check",   label: "Keyword density check",          hint: "Warn on JD keyword stuffing." },
+  { key: "date_normalization",      label: "Date normalization",             hint: "Enforce ISO dates in sections." },
+  { key: "section_order_check",     label: "Section order check",            hint: "Warn on non-standard section order." },
+];
+
+export default function SettingsPage() {
+  const qc = useQueryClient();
+  const { user } = useAuth();
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => api.get<Settings>("/api/settings"),
+  });
+
+  const save = useMutation({
+    mutationFn: (next: Settings) => api.patch<Settings>("/api/settings", next),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["settings"] }),
+  });
+
+  if (isLoading || !data) return <Spinner />;
+
+  const toggle = (key: string) =>
+    save.mutate({
+      ...data,
+      accuracyToggles: { ...data.accuracyToggles, [key]: !data.accuracyToggles[key] },
+    });
+
+  return (
+    <div className="space-y-8">
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+        <p className="mt-1 text-sm text-fg-2">Accuracy toggles, theme, and account.</p>
+      </header>
+
+      <Card className="p-6">
+        <h2 className="mb-4 text-sm font-semibold text-fg">Accuracy</h2>
+        <div className="space-y-3">
+          {TOGGLES.map((t) => {
+            const on = !!data.accuracyToggles[t.key];
+            return (
+              <div key={t.key} className="flex items-start justify-between gap-4 rounded-lg border border-border bg-bg-2 p-4">
+                <div>
+                  <div className="text-sm text-fg">{t.label}</div>
+                  <div className="mt-0.5 text-xs text-fg-2">{t.hint}</div>
+                </div>
+                <button
+                  onClick={() => toggle(t.key)}
+                  aria-pressed={on}
+                  className={
+                    "relative h-6 w-11 shrink-0 rounded-full border transition-colors " +
+                    (on ? "border-gold bg-gold/30" : "border-border bg-bg-3")
+                  }
+                >
+                  <span
+                    className={
+                      "absolute top-0.5 h-4 w-4 rounded-full transition-transform " +
+                      (on ? "left-6 bg-gold-2" : "left-0.5 bg-fg-2")
+                    }
+                  />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      <Card className="p-6">
+        <h2 className="mb-4 text-sm font-semibold text-fg">Theme</h2>
+        <div className="rounded-lg border border-border bg-bg-2 p-4 text-sm text-fg-2">
+          Dark theme (locked for Phase 1).
+        </div>
+      </Card>
+
+      <Card className="p-6">
+        <h2 className="mb-4 text-sm font-semibold text-fg">Account</h2>
+        <div className="space-y-1 text-sm">
+          <div><span className="text-fg-2">Name: </span>{user?.name}</div>
+          <div><span className="text-fg-2">Email: </span>{user?.email}</div>
+          <div><span className="text-fg-2">Role: </span>{user?.role}</div>
+          <div><span className="text-fg-2">2FA: </span>{user?.twoFactorEnabled ? "enabled" : "disabled"}</div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+
+================================================================================
+SCREEN 10 — /(admin)/admin/users
+================================================================================
+
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import { Badge, Card, Skeleton } from "@/components/ui";
+
+interface AdminUserRow {
+  id: string;
+  name: string;
+  email: string;
+  role: "owner" | "admin" | "member";
+  runsThisMonth: number;
+  runsLimit: number;
+}
+
+export default function AdminUsersPage() {
+  const { data, isLoading } = useQuery({
+    queryKey: ["admin", "users"],
+    queryFn: () => api.get<{ items: AdminUserRow[] }>("/api/admin/users"),
+  });
+
+  return (
+    <div className="space-y-6">
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight">Users</h1>
+        <p className="mt-1 text-sm text-fg-2">Roles and monthly usage.</p>
+      </header>
+
+      <Card className="overflow-hidden">
+        {isLoading ? (
+          <div className="space-y-2 p-4"><Skeleton className="h-10" /><Skeleton className="h-10" /></div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-bg-2 text-left text-xs uppercase tracking-wide text-fg-2">
+              <tr>
+                <th className="px-4 py-3">Name</th>
+                <th className="px-4 py-3">Email</th>
+                <th className="px-4 py-3">Role</th>
+                <th className="px-4 py-3">Runs (month)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {data?.items.map((u) => (
+                <tr key={u.id} className="hover:bg-bg-3/40">
+                  <td className="px-4 py-3">{u.name}</td>
+                  <td className="px-4 py-3 text-fg-2">{u.email}</td>
+                  <td className="px-4 py-3">
+                    <Badge tone={u.role === "owner" ? "ok" : u.role === "admin" ? "warn" : "idle"}>
+                      {u.role}
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-3 text-fg-2">{u.runsThisMonth} / {u.runsLimit}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+
+================================================================================
+SCREEN 11 — /(admin)/admin/runs
+================================================================================
+
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
+import { api } from "@/lib/api";
+import { Badge, Card, Skeleton } from "@/components/ui";
+import type { Run } from "@/lib/types";
+import { format } from "date-fns";
+
+export default function AdminRunsPage() {
+  const { data, isLoading } = useQuery({
+    queryKey: ["admin", "runs"],
+    queryFn: () => api.get<{ items: Run[] }>("/api/admin/runs"),
+  });
+
+  return (
+    <div className="space-y-6">
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight">Global runs</h1>
+        <p className="mt-1 text-sm text-fg-2">All runs across the tenant.</p>
+      </header>
+
+      <Card className="overflow-hidden">
+        {isLoading ? (
+          <div className="space-y-2 p-4"><Skeleton className="h-10" /><Skeleton className="h-10" /></div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-bg-2 text-left text-xs uppercase tracking-wide text-fg-2">
+              <tr>
+                <th className="px-4 py-3">Run</th>
+                <th className="px-4 py-3">Profile</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Created</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {data?.items.map((r) => (
+                <tr key={r.id} className="hover:bg-bg-3/40">
+                  <td className="px-4 py-3 font-mono text-xs text-gold-2">
+                    <Link href={`/runs/${r.id}`}>{r.id.slice(0, 8)}</Link>
+                  </td>
+                  <td className="px-4 py-3">{r.profileName}</td>
+                  <td className="px-4 py-3">
+                    <Badge tone={r.status === "failed" ? "fail" : r.status === "completed" ? "ok" : "idle"}>
+                      {r.status}
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-3 text-xs text-fg-2">
+                    {format(new Date(r.createdAt), "MMM d, HH:mm")}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+
+================================================================================
+SCREEN 12 — /(admin)/admin/audit
+================================================================================
+
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import { Card, Skeleton } from "@/components/ui";
+import type { AuditEntry } from "@/lib/types";
+import { format } from "date-fns";
+
+export default function AdminAuditPage() {
+  const { data, isLoading } = useQuery({
+    queryKey: ["admin", "audit"],
+    queryFn: () => api.get<{ items: AuditEntry[] }>("/api/admin/audit?limit=200"),
+  });
+
+  return (
+    <div className="space-y-6">
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight">Audit log</h1>
+        <p className="mt-1 text-sm text-fg-2">Admin actions across the system.</p>
+      </header>
+
+      <Card className="overflow-hidden">
+        {isLoading ? (
+          <div className="space-y-2 p-4"><Skeleton className="h-10" /><Skeleton className="h-10" /></div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-bg-2 text-left text-xs uppercase tracking-wide text-fg-2">
+              <tr>
+                <th className="px-4 py-3">When</th>
+                <th className="px-4 py-3">Actor</th>
+                <th className="px-4 py-3">Action</th>
+                <th className="px-4 py-3">Target</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {data?.items.map((e) => (
+                <tr key={e.id} className="hover:bg-bg-3/40">
+                  <td className="px-4 py-3 text-xs text-fg-2">
+                    {format(new Date(e.createdAt), "MMM d, HH:mm:ss")}
+                  </td>
+                  <td className="px-4 py-3">{e.actor}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-gold-2">{e.action}</td>
+                  <td className="px-4 py-3 text-fg-2">{e.target}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+
+================================================================================
+SCREEN 13 — /(admin)/admin/reproduce
+================================================================================
+
+"use client";
+
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { api } from "@/lib/api";
+import { Button, Card, Input } from "@/components/ui";
+import type { Run } from "@/lib/types";
+
+export default function AdminReproducePage() {
+  const [runId, setRunId] = useState("");
+  const [bootstrapToken, setBootstrapToken] = useState("");
+
+  const { data: original } = useQuery({
+    queryKey: ["admin", "run", runId],
+    queryFn: () => api.get<Run>(`/api/admin/runs/${runId}`),
+    enabled: runId.length > 0,
+  });
+
+  const reproduce = useMutation({
+    mutationFn: () =>
+      api.post<Run>(
+        `/api/admin/runs/${runId}/reproduce`,
+        {},
+        { extraHeaders: { "X-Bootstrap-Token": bootstrapToken } }
+      ),
+  });
+
+  return (
+    <div className="space-y-6">
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight">Reproduce run</h1>
+        <p className="mt-1 text-sm text-fg-2">
+          Re-execute a run with pinned model and ruleset versions.
+        </p>
+      </header>
+
+      <Card className="space-y-4 p-6">
+        <div>
+          <label className="mb-2 block text-xs uppercase tracking-wide text-fg-2">Run ID</label>
+          <Input value={runId} onChange={(e) => setRunId(e.target.value)} placeholder="run_…" />
+        </div>
+
+        <div>
+          <label className="mb-2 block text-xs uppercase tracking-wide text-fg-2">
+            Bootstrap token (X-Bootstrap-Token)
+          </label>
+          <Input
+            type="password"
+            value={bootstrapToken}
+            onChange={(e) => setBootstrapToken(e.target.value)}
+            placeholder="bootstrap token"
+          />
+        </div>
+
+        {original && (
+          <div className="rounded-lg bg-bg-2 p-4 text-sm text-fg-2">
+            <div><span className="text-fg-2">Profile: </span>{original.profileName}</div>
+            <div><span className="text-fg-2">Status: </span>{original.status}</div>
+            <div><span className="text-fg-2">Created: </span>{original.createdAt}</div>
+          </div>
+        )}
+
+        <Button
+          disabled={!runId || !bootstrapToken}
+          loading={reproduce.isPending}
+          onClick={() => reproduce.mutate()}
+        >
+          Reproduce with pinned versions
+        </Button>
+
+        {reproduce.data && (
+          <p className="text-sm text-success">New run created: {reproduce.data.id}</p>
+        )}
+        {reproduce.isError && (
+          <p className="text-sm text-danger">{(reproduce.error as Error).message}</p>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+
+================================================================================
+SCREEN 14 — /(app)/agency-branding
+================================================================================
+
+"use client";
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
+import { Button, Card, Input } from "@/components/ui";
+import type { Branding } from "@/lib/types";
+
+export default function AgencyBrandingPage() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({
+    queryKey: ["agency", "branding"],
+    queryFn: () => api.get<Branding>("/api/agency/branding"),
+  });
+
+  const [form, setForm] = useState<Branding | null>(null);
+  useEffect(() => { if (data) setForm(data); }, [data]);
+
+  const save = useMutation({
+    mutationFn: (next: Branding) => api.patch<Branding>("/api/agency/branding", next),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["agency", "branding"] }),
+  });
+
+  const uploadLogo = useMutation({
+    mutationFn: (file: File) => {
+      const fd = new FormData();
+      fd.append("logo", file);
+      return api.post<Branding>("/api/agency/branding/logo", fd);
+    },
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["agency", "branding"] }),
+  });
+
+  if (isLoading || !form) return null;
+
+  return (
+    <div className="space-y-6">
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight">Agency branding</h1>
+        <p className="mt-1 text-sm text-fg-2">Logo, accent color, and footer applied to exports.</p>
+      </header>
+
+      <Card className="space-y-4 p-6">
+        <div>
+          <label className="mb-2 block text-xs uppercase tracking-wide text-fg-2">Logo</label>
+          {form.logoUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={form.logoUrl} alt="logo" className="mb-2 h-12" />
+          )}
+          <input
+            type="file"
+            accept="image/png,image/svg+xml"
+            onChange={(e) => e.target.files?.[0] && uploadLogo.mutate(e.target.files[0])}
+            className="block text-sm text-fg-2"
+          />
+        </div>
+
+        <div>
+          <label className="mb-2 block text-xs uppercase tracking-wide text-fg-2">Primary color</label>
+          <div className="flex items-center gap-3">
+            <input
+              type="color"
+              value={form.primaryColor}
+              onChange={(e) => setForm({ ...form, primaryColor: e.target.value })}
+              className="h-9 w-14 cursor-pointer rounded-md border border-border bg-bg-2"
+            />
+            <Input
+              value={form.primaryColor}
+              onChange={(e) => setForm({ ...form, primaryColor: e.target.value })}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="mb-2 block text-xs uppercase tracking-wide text-fg-2">Footer text</label>
+          <Input
+            value={form.footerText}
+            onChange={(e) => setForm({ ...form, footerText: e.target.value })}
+            placeholder="Whink Apps · resumeengine.io"
+          />
+        </div>
+
+        <Button loading={save.isPending} onClick={() => save.mutate(form)}>
+          Save branding
+        </Button>
+      </Card>
+    </div>
+  );
+}
+
+
+================================================================================
+SECTION 15 — /(app)/login  (auth entry point)
+================================================================================
+
+"use client";
+
+import { useAuth } from "@/lib/auth";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { Button, Card, Input } from "@/components/ui";
+
+export default function LoginPage() {
+  const { login } = useAuth();
+  const router = useRouter();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      await login(email, password);
+      router.replace("/dashboard");
+    } catch (err) {
+      setError((err as Error).message || "Login failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="flex min-h-screen items-center justify-center p-6">
+      <Card className="w-full max-w-sm space-y-5 p-7">
+        <div className="flex items-center gap-2">
+          <div className="h-7 w-7 rounded-md bg-gradient-to-br from-gold to-gold-2" />
+          <span className="font-semibold">Resume Engine</span>
+        </div>
+
+        <form onSubmit={onSubmit} className="space-y-3">
+          <Input
+            type="email"
+            placeholder="you@agency.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
+          <Input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+          {error && <p className="text-xs text-danger">{error}</p>}
+          <Button type="submit" loading={loading} className="w-full">Sign in</Button>
+        </form>
+      </Card>
+    </div>
+  );
+}
+
+
+================================================================================
+END OF FILE
+================================================================================
