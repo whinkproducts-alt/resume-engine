@@ -1,0 +1,97 @@
+# Production on a single VPS: Caddy (HTTPS) -> web -> api, plus worker, Postgres, Redis.
+# Only Caddy publishes ports. Run from this directory:
+#   docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+name: resume-engine
+
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env.production}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env.production}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [web]
+
+  web:
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/Dockerfile.web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_ORIGIN: http://api:3001
+    expose: ["3000"]
+    depends_on:
+      api: { condition: service_healthy }
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/Dockerfile.api
+    image: resume-engine-api:local
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      DATABASE_URL: postgresql://resume:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/resume_engine?schema=public
+      REDIS_URL: redis://redis:6379
+    expose: ["3001"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/v1/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  worker:
+    image: resume-engine-api:local
+    restart: unless-stopped
+    command: ["node", "dist/workers/worker-main.js"]
+    env_file: .env.production
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://resume:${POSTGRES_PASSWORD}@postgres:5432/resume_engine?schema=public
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      api: { condition: service_healthy }
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: resume
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: resume_engine
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U resume -d resume_engine"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    # appendonly keeps queued jobs across a restart; noeviction is required by BullMQ
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes: ["redisdata:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:
+  redisdata:
+  caddy_data:
+  caddy_config:

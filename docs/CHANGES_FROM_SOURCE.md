@@ -27,6 +27,7 @@ The four code documents are kept unmodified in `docs/source-parts/`, and the fir
 | `apps/api/prisma/schema.prisma` | Three nullable `User` columns for admin 2FA, through migration `20261031010000_admin_2fa`. |
 | `apps/api/.env.example` | Added the Part 3 variables (minus a duplicate `ADMIN_BOOTSTRAP_TOKEN=` that would have blanked the real one), LLM and TOTP variables. `PORT` is 3001 so it does not collide with the web app. |
 | `apps/web/tailwind.config.ts` | Opacity modifiers (`bg-gold/10`) do not work on bare `var(--x)` colours and the build failed. Tokens are wrapped with `<alpha-value>` and `color-mix`; the hex values in `globals.css` are untouched. |
+| `apps/web/next.config.mjs` | The `/v1` proxy moved from `rewrites()` (evaluated at build time, so the API address would have been frozen into the image) to `src/middleware.ts`, which reads `API_ORIGIN` at request time. |
 | `apps/web/package.json` | Renamed to `@resume-engine/web` (it shared the root's name); test, typecheck, ESLint dependencies. |
 | `apps/web/src/components/app-shell.tsx`, `app/(admin)/layout.tsx` | Use the real user fields and `isAdmin`. |
 

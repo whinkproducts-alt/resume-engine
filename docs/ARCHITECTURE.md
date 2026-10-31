@@ -6,7 +6,7 @@ What the code does today. Decisions behind it are in [DECISIONS.md](./DECISIONS.
 
 | Path | What it is |
 |---|---|
-| `apps/web` | Next.js 14 (App Router), React 18, Tailwind, TanStack Query. Talks to the API only through `/v1`, which Next proxies to `API_ORIGIN`. |
+| `apps/web` | Next.js 14 (App Router), React 18, Tailwind, TanStack Query. Talks to the API only through `/v1`, which a Next middleware proxies to `API_ORIGIN`, read at request time so one image fits every environment. |
 | `apps/api` | NestJS 10 on Prisma and PostgreSQL. Also holds the pipeline (`src/pipeline`) and the worker entrypoint (`src/workers/worker-main.ts`). |
 | `packages/rules` | The validator: R1 to R20, the fact bank check, the retry loop. Pure TypeScript, no I/O. |
 | `packages/renderer` | `ResumeDoc` to DOCX with the `docx` library, to the section 6 layout. |
@@ -18,7 +18,7 @@ The packages build to CommonJS (`tsconfig.base.json`) because the Nest app is Co
 ## Processes
 
 ```
-browser ──/v1──> web (Next) ──rewrite──> api (Nest) ──> PostgreSQL
+browser ──/v1──> web (Next middleware proxy) ──> api (Nest) ──> PostgreSQL
                                            │  enqueue
                                            ▼
                                         Redis ◀── worker (BullMQ) ──> LLM, S3/R2, LibreOffice

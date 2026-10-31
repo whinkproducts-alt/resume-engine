@@ -1,0 +1,124 @@
+# Render Blueprint: web, API, worker, Postgres and Key Value (Redis).
+#
+# NOT VERIFIED against Render's schema: render.com could not be reached when this was
+# written, and nothing here has been deployed. Render validates the file when you create the
+# Blueprint and names any field or plan it does not accept; plan names in particular change.
+#
+# Values marked "sync: false" are asked for in the Render dashboard (never committed).
+# The web service reaches the API over Render's private network (API_ORIGIN, host:port).
+
+databases:
+  - name: resume-engine-db
+    plan: basic-256mb
+    databaseName: resume_engine
+    user: resume
+
+services:
+  - type: keyvalue
+    name: resume-engine-redis
+    plan: starter
+    # BullMQ requires that keys are never evicted
+    maxmemoryPolicy: noeviction
+    ipAllowList: []   # private network only
+
+  - type: web
+    name: resume-engine-web
+    runtime: docker
+    dockerfilePath: ./infrastructure/docker/Dockerfile.web
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /login
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: API_ORIGIN
+        fromService:
+          type: web
+          name: resume-engine-api
+          property: hostport
+
+  - type: web
+    name: resume-engine-api
+    runtime: docker
+    dockerfilePath: ./infrastructure/docker/Dockerfile.api
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /v1/readyz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: resume-engine-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: resume-engine-redis
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ADMIN_BOOTSTRAP_TOKEN
+        generateValue: true
+      - key: TOTP_ENCRYPTION_KEY
+        generateValue: true   # a random base64 value; must decode to 32 bytes, check after the first deploy
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_SEED_PASSWORD
+        sync: false
+      - key: LLM_PROVIDER
+        value: openai
+      - key: LLM_MODEL_ANALYZE
+        sync: false
+      - key: LLM_MODEL_WRITE
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY
+        sync: false
+      - key: S3_SECRET_KEY
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_ENDPOINT
+        sync: false
+
+  - type: worker
+    name: resume-engine-worker
+    runtime: docker
+    dockerfilePath: ./infrastructure/docker/Dockerfile.api
+    dockerContext: .
+    dockerCommand: node dist/workers/worker-main.js
+    plan: starter
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: resume-engine-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: resume-engine-redis
+          property: connectionString
+      - key: LLM_PROVIDER
+        value: openai
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_MODEL_ANALYZE
+        sync: false
+      - key: LLM_MODEL_WRITE
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY
+        sync: false
+      - key: S3_SECRET_KEY
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_ENDPOINT
+        sync: false
+      - key: WORKER_CONCURRENCY
+        value: "3"

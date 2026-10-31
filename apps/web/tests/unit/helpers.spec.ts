@@ -84,3 +84,17 @@ describe("fact bank form", () => {
     expect(factDraftValid({ ...base, kind: "skill" as never, metricValue: "" })).toBe(true);
   });
 });
+
+import { apiOrigin } from "@/lib/api-origin";
+
+describe("apiOrigin", () => {
+  it("defaults to the local API", () => {
+    expect(apiOrigin("")).toBe("http://localhost:3001");
+    expect(apiOrigin(undefined)).toBe("http://localhost:3001");
+  });
+  it("accepts full URLs, trims slashes, and adds http:// to a bare host:port", () => {
+    expect(apiOrigin("https://api.example.com/")).toBe("https://api.example.com");
+    expect(apiOrigin("http://api:3001")).toBe("http://api:3001");
+    expect(apiOrigin(" resume-api:10000 ")).toBe("http://resume-api:10000");
+  });
+});

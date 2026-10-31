@@ -16,7 +16,8 @@ Paste a job description, press one button, get a tailored, ATS ready `.docx` (an
 | `packages/qa` | LibreOffice PDF conversion and page count |
 | `packages/storage` | S3 / R2 storage and signed URLs |
 | `docs/` | Spec, rules, API, architecture, decisions |
-| `infrastructure/` | Docker Compose for local Postgres and Redis |
+| `infrastructure/` | Dockerfiles, Compose files (local and production), Caddyfile |
+| `render.yaml` | Render Blueprint |
 
 ## Quick start
 
@@ -56,7 +57,7 @@ Details and precedence between the spec documents: [docs/DECISIONS.md](docs/DECI
 | [API.md](docs/API.md) | Endpoints, and what is not built |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | How it fits together, known gaps |
 | [DESIGN_TOKENS.md](docs/DESIGN_TOKENS.md), [03-FRONTEND-STAGE4.md](docs/03-FRONTEND-STAGE4.md) | UI |
-| [ONBOARDING.md](docs/ONBOARDING.md), [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Running and deploying |
+| [ONBOARDING.md](docs/ONBOARDING.md), [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Running locally; deploying to a VPS (Docker Compose) or Render |
 | [CHANGES_FROM_SOURCE.md](docs/CHANGES_FROM_SOURCE.md) | Everything changed from the supplied code, and why |
 | `docs/source-parts/` | The supplied documents, unmodified |
 | `docs/03-ui-reference/resume-engine.html` | The supplied UI reference |

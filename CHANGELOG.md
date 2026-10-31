@@ -12,4 +12,5 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - API: auth with rotating refresh cookie, profiles and roster, JDs, runs, settings,
   branding, admin panel, admin 2FA.
 - Web app for all Phase 1 screens.
+- Deployment: Dockerfiles, production Docker Compose with Caddy HTTPS, Render Blueprint, `/v1/healthz` and `/v1/readyz`.
 - Fact bank API (list, create, verify, import from base résumé, update, delete) and a Fact Bank section on the profile page.

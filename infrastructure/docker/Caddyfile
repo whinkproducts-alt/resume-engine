@@ -1,0 +1,16 @@
+# TLS certificates are issued and renewed automatically for $DOMAIN.
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode gzip
+	# base résumés and job descriptions are capped at 10 MB by the API
+	request_body {
+		max_size 20MB
+	}
+	# flush_interval -1 so the run progress stream (server sent events) is not buffered
+	reverse_proxy web:3000 {
+		flush_interval -1
+	}
+}

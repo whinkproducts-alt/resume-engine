@@ -4,6 +4,13 @@ The backend defines the contract (`docs/DECISIONS.md`); the source is `docs/01-S
 
 A request for another user's resource gets `404`, never `403`.
 
+## Health
+
+| Method and path | Notes |
+|---|---|
+| `GET /healthz` | `{ ok: true }`. No token, no dependencies. |
+| `GET /readyz` | `{ ok: true, db: true }`, or `503 NOT_READY` when the database does not answer. |
+
 ## Auth
 
 | Method and path | Request | Response |
@@ -94,4 +101,4 @@ The TOTP seed is stored AES-256-GCM encrypted (`TOTP_ENCRYPTION_KEY`), recovery 
 
 ## In the spec but not built
 
-Public signup, password reset, Google OAuth, `/auth/login/totp`; `/users/*`; `DELETE /profiles/:id` and `/profiles/:id/settings`; `GET /jds`; `regenerate-section`, `PATCH /runs/:id/output` and `approve`; batches; billing and Stripe webhooks; branding logo upload; admin user edits, credits and refunds; health endpoints and metrics; API keys; `Idempotency-Key`.
+Public signup, password reset, Google OAuth, `/auth/login/totp`; `/users/*`; `DELETE /profiles/:id` and `/profiles/:id/settings`; `GET /jds`; `regenerate-section`, `PATCH /runs/:id/output` and `approve`; batches; billing and Stripe webhooks; branding logo upload; admin user edits, credits and refunds; `/metrics`; API keys; `Idempotency-Key`.

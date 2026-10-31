@@ -29,7 +29,7 @@ Route groups `(app)` and `(admin)` do not appear in URLs.
 
 ## How it talks to the backend
 
-- Every call is under `/v1` (`src/lib/api.ts`). `next.config.mjs` rewrites `/v1/*` to `API_ORIGIN`, so the browser stays on one origin and the refresh cookie (`Path=/v1/auth`) is first party.
+- Every call is under `/v1` (`src/lib/api.ts`). `src/middleware.ts` proxies `/v1/*` to `API_ORIGIN` (read at request time, so the same build works anywhere), so the browser stays on one origin and the refresh cookie (`Path=/v1/auth`) is first party.
 - The access token is held in memory. On load, `POST /auth/refresh` (cookie) then `GET /auth/me` restores the session. A 401 triggers one shared refresh and one retry; auth endpoints are never retried.
 - Errors arrive as `{ error: { code, message } }` and are thrown as `ApiError(status, code, message)`.
 - Progress uses the SSE endpoint, read with `fetch` because `EventSource` cannot send an Authorization header, and falls back to polling `GET /runs/:id` every 2 seconds.
