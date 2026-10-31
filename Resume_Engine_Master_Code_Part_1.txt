@@ -1,0 +1,1757 @@
+================================================================================
+RESUME ENGINE — STAGE 1 / PHASE 1 IMPLEMENTATION PACKAGE
+NestJS API + Prisma PostgreSQL + Auth + Profiles + JD Intake
+Owner: Victor Igboekwe (Whink Apps)
+================================================================================
+
+CONTENTS
+  Part 1 — Scaffold commands
+  Part 2 — Environment template
+  Part 3 — prisma/schema.prisma
+  Part 4 — NestJS source code
+  Part 5 — Build / verification commands
+
+NOTE ON SCHEMA
+  Section 4 of the Master Spec defines UserSettings.user as a relation to User,
+  but does not declare the opposite field on User. Prisma requires both sides.
+  The only deviation from the literal spec below is the added back-relation:
+      User.userSettings UserSettings?
+  Everything else is exact, including Run.baseResumeId being required.
+================================================================================
+
+
+================================================================================
+PART 1 — SCAFFOLD COMMANDS
+================================================================================
+
+# 1. Create the workspace and NestJS app at apps/api
+mkdir -p resume-engine/apps
+cd resume-engine/apps
+npx @nestjs/cli@10 new api --package-manager npm --strict --skip-git
+cd api
+
+# 2. Runtime dependencies
+npm i @nestjs/config @nestjs/jwt @prisma/client argon2 ioredis \
+      class-validator class-transformer cheerio mammoth @nestjs/mapped-types
+
+# 3. Dev dependencies
+npm i -D prisma @types/multer @types/express
+
+# 4. Initialise Prisma
+npx prisma init --datasource-provider postgresql
+
+# 5. Create source folders
+mkdir -p src/prisma
+mkdir -p src/common/errors
+mkdir -p src/common/rate-limit
+mkdir -p src/auth/dto
+mkdir -p src/profiles/dto
+mkdir -p src/jds/dto
+mkdir -p src/runs
+
+# 6. After writing schema.prisma (Part 3):
+npx prisma format
+npx prisma validate
+npx prisma migrate dev --name init
+npx prisma generate
+
+
+================================================================================
+PART 2 — ENVIRONMENT TEMPLATE
+File: apps/api/.env.example  (never commit the real .env)
+================================================================================
+
+NODE_ENV=development
+PORT=3000
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/resume_engine?schema=public
+REDIS_URL=redis://localhost:6379
+JWT_SECRET=replace-with-32-byte-random-base64
+
+# Admin provisioning — secret store only in production
+ADMIN_EMAIL=Whinkproducts@gmail.com
+ADMIN_SEED_PASSWORD=replace-with-strong-unique-password
+ADMIN_BOOTSTRAP_TOKEN=replace-with-random-32-byte-base64
+
+
+================================================================================
+PART 3 — PRISMA SCHEMA
+File: apps/api/prisma/schema.prisma
+================================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  PRO
+  AGENCY
+  ADMIN
+}
+
+enum RunStatus {
+  QUEUED
+  READING_JD
+  ANALYZING
+  AWAITING_COMPANY_CONFIRM
+  REWRITING
+  VALIDATING
+  RENDERING
+  EXPORTING_PDF
+  COMPLETE
+  FAILED
+  CANCELLED
+}
+
+model User {
+  id                String   @id @default(uuid())
+  email             String   @unique
+  passwordHash      String
+  role              UserRole @default(USER)
+  isAdmin           Boolean  @default(false)
+  adminUnlimited    Boolean  @default(false)
+  emailVerified     Boolean  @default(false)
+  mustChangePassword Boolean @default(false)
+  firstName         String?
+  lastName          String?
+  themePref         String   @default("SYSTEM")
+  stripeCustomerId  String?  @unique
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  profiles            Profile[]
+  subscription        Subscription?
+  payments            Payment[]
+  runCredits          RunCredit[]
+  usage               UsageCounter[]
+  sessions            Session[]
+  resetTokens         PasswordResetToken[]
+  oauthAccounts       OAuthAccount[]
+  runs                Run[]
+  branding            BrandingConfig?
+  adminActionsMade    AdminAction[] @relation("adminMade")
+  adminActionsOnSelf  AdminAction[] @relation("adminOn")
+
+  // Required back-relation for UserSettings.user
+  userSettings        UserSettings?
+}
+
+model Session {
+  id          String    @id @default(uuid())
+  userId      String
+  refreshHash String
+  userAgent   String?
+  ip          String?
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  user        User      @relation(fields: [userId], references: [id])
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  user      User      @relation(fields: [userId], references: [id])
+}
+
+model OAuthAccount {
+  id         String @id @default(uuid())
+  userId     String
+  provider   String
+  providerId String
+  user       User   @relation(fields: [userId], references: [id])
+  @@unique([provider, providerId])
+}
+
+model AdminAction {
+  id           String   @id @default(uuid())
+  adminId      String
+  targetUserId String?
+  action       String
+  meta         Json?
+  ip           String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+  admin        User     @relation("adminMade", fields: [adminId], references: [id])
+  targetUser   User?    @relation("adminOn", fields: [targetUserId], references: [id])
+  @@index([adminId, createdAt])
+  @@index([targetUserId, createdAt])
+}
+
+model Profile {
+  id             String   @id @default(uuid())
+  userId         String
+  name           String
+  headerFullName String
+  headerCity     String
+  headerPhones   String[]
+  headerEmail    String
+  linkedIn       String?
+  isDefault      Boolean  @default(false)
+  activeBaseId   String?
+  user           User     @relation(fields: [userId], references: [id])
+  bases          BaseResume[]
+  roles          RoleEntry[]
+  education      Education[]
+  certs          Certification[]
+  facts          FactBankEntry[]
+  settings       ProfileSettings?
+  runs           Run[]
+  @@index([userId])
+}
+
+model BaseResume {
+  id         String   @id @default(uuid())
+  profileId  String
+  version    Int
+  fileName   String
+  parsedJson Json
+  isActive   Boolean  @default(false)
+  uploadedAt DateTime @default(now())
+  profile    Profile  @relation(fields: [profileId], references: [id])
+  @@unique([profileId, version])
+  @@index([profileId, isActive])
+}
+
+model RoleEntry {
+  id          String    @id @default(uuid())
+  profileId   String
+  companyName String
+  title       String
+  baseTitle   String
+  startDate   DateTime
+  endDate     DateTime?
+  location    String?
+  orderIndex  Int
+  baseBullets Json
+  baseFlagship String?
+  profile     Profile   @relation(fields: [profileId], references: [id])
+  @@index([profileId, orderIndex])
+}
+
+model Education {
+  id          String  @id @default(uuid())
+  profileId   String
+  institution String
+  degree      String
+  field       String?
+  startYear   Int
+  endYear     Int?
+  profile     Profile @relation(fields: [profileId], references: [id])
+}
+
+model Certification {
+  id        String  @id @default(uuid())
+  profileId String
+  name      String
+  issuer    String?
+  year      Int?
+  profile   Profile @relation(fields: [profileId], references: [id])
+}
+
+model FactBankEntry {
+  id          String  @id @default(uuid())
+  profileId   String
+  roleId      String?
+  kind        String
+  claimText   String
+  metricValue String?
+  metricUnit  String?
+  context     String
+  employer    String?
+  verified    Boolean @default(false)
+  sourceNote  String?
+  profile     Profile @relation(fields: [profileId], references: [id])
+  @@index([profileId, verified])
+}
+
+model JobDescription {
+  id                String   @id @default(uuid())
+  userId            String
+  profileId         String
+  sourceType        String
+  sourceUrl         String?
+  sourceFileName    String?
+  rawText           String
+  extractedChars    Int
+  status            String
+  company           String?
+  roleTitle         String?
+  location          String?
+  salaryText        String?
+  seniority         String?
+  industryTags      String[]
+  responsibilities  Json?
+  requirements      Json?
+  keywords          String[]
+  companyInferred   Boolean  @default(false)
+  companyConfidence Float?
+  createdAt         DateTime @default(now())
+  runs              Run[]
+  @@index([userId, createdAt])
+}
+
+model Run {
+  id                     String    @id @default(uuid())
+  userId                 String
+  profileId              String
+  baseResumeId           String
+  ruleSetId              String
+  jdId                   String
+  planTier               String
+  status                 RunStatus @default(QUEUED)
+  stage                  String?
+  progress               Float     @default(0)
+  companyConfirmed       Boolean   @default(false)
+  contactLocationOverride String?
+  settingsSnap           Json
+  atsScore               Int?
+  metrics                Json?
+  keywordCount           Int?
+  pageCount              Int?
+  estimatedCostUsd       Float?
+  actualTokens           Int?
+  validation             Json?
+  outputJson             Json?
+  docxKey                String?
+  pdfKey                 String?
+  errorCode              String?
+  startedAt              DateTime?
+  finishedAt             DateTime?
+  createdAt              DateTime  @default(now())
+  user                   User      @relation(fields: [userId], references: [id])
+  profile                Profile   @relation(fields: [profileId], references: [id])
+  jd                     JobDescription @relation(fields: [jdId], references: [id])
+  ruleSet                RuleSet   @relation(fields: [ruleSetId], references: [id])
+  steps                  RunLog[]
+  flags                  ValidationFlag[]
+  keywordSet             KeywordSet?
+  targets                AlignedCompany[]
+  @@index([userId, createdAt])
+}
+
+model RuleSet {
+  id            String   @id @default(uuid())
+  version       String   @unique
+  rulesJson     Json
+  styleConfig   Json
+  promptVersion String
+  createdAt     DateTime @default(now())
+  runs          Run[]
+}
+
+model PromptVersion {
+  id        String   @id @default(uuid())
+  section   String
+  version   String
+  template  String
+  modelId   String
+  createdAt DateTime @default(now())
+  @@unique([section, version])
+}
+
+model KeywordSet {
+  id            String @id @default(uuid())
+  runId         String @unique
+  jdTerms       String[]
+  relatedTerms  String[]
+  totalDistinct Int
+  run           Run    @relation(fields: [runId], references: [id])
+}
+
+model AlignedCompany {
+  id          String  @id @default(uuid())
+  runId       String
+  rank        Int
+  name        String
+  department  String?
+  exampleRole String?
+  isTarget    Boolean @default(false)
+  run         Run     @relation(fields: [runId], references: [id])
+  @@unique([runId, rank])
+}
+
+model RunLog {
+  id         String   @id @default(uuid())
+  runId      String
+  step       String
+  status     String
+  attempt    Int      @default(1)
+  durationMs Int?
+  tokensIn   Int?
+  tokensOut  Int?
+  modelId    String?
+  errorCode  String?
+  errorMsg   String?
+  createdAt  DateTime @default(now())
+  run        Run      @relation(fields: [runId], references: [id])
+  @@index([runId])
+}
+
+model ValidationFlag {
+  id       String  @id @default(uuid())
+  runId    String
+  code     String
+  severity String
+  field    String?
+  message  String
+  run      Run     @relation(fields: [runId], references: [id])
+  @@index([runId])
+}
+
+model Document {
+  id        String   @id @default(uuid())
+  runId     String   @unique
+  docxKey   String
+  pdfKey    String?
+  sizeBytes Int?
+  createdAt DateTime @default(now())
+}
+
+model UserSettings {
+  id                   String  @id @default(uuid())
+  userId               String  @unique
+  strictFactsMode      Boolean @default(true)
+  flagAndInclude       Boolean @default(false)
+  lockCompanyNames     Boolean @default(true)
+  lockEmploymentDates  Boolean @default(true)
+  blockOnUnusableJD    Boolean @default(true)
+  inferCompanyName     Boolean @default(true)
+  banHyphensInProse    Boolean @default(true)
+  consultingFraming    Boolean @default(false)
+  whinkGroupFraming    Boolean @default(false)
+  heritageLineDefault  Boolean @default(false)
+  user                 User    @relation(fields: [userId], references: [id])
+}
+
+model ProfileSettings {
+  id        String  @id @default(uuid())
+  profileId String  @unique
+  overrides Json
+  profile   Profile @relation(fields: [profileId], references: [id])
+}
+
+model Plan {
+  id                    String  @id @default(uuid())
+  code                  String  @unique
+  name                  String
+  priceCentsMonthly     Int
+  priceCentsAnnual      Int?
+  runsPerMonth          Int?
+  maxProfiles           Int?
+  features              Json
+  stripePriceMonthlyId  String?
+  stripePriceAnnualId   String?
+  stripePriceOneRunId   String?
+}
+
+model Subscription {
+  id                   String    @id @default(uuid())
+  userId               String    @unique
+  planCode             String
+  status               String
+  stripeSubscriptionId String?   @unique
+  stripePriceId        String?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean   @default(false)
+  user                 User      @relation(fields: [userId], references: [id])
+}
+
+model Payment {
+  id                    String   @id @default(uuid())
+  userId                String
+  stripePaymentIntentId String?  @unique
+  kind                  String
+  amountCents           Int
+  currency              String   @default("usd")
+  status                String
+  createdAt             DateTime @default(now())
+  user                  User     @relation(fields: [userId], references: [id])
+  @@index([userId, createdAt])
+}
+
+model RunCredit {
+  id        String    @id @default(uuid())
+  userId    String
+  source    String
+  remaining Int
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id])
+  @@index([userId])
+}
+
+model UsageCounter {
+  id       String @id @default(uuid())
+  userId   String
+  period   String
+  runsUsed Int    @default(0)
+  user     User   @relation(fields: [userId], references: [id])
+  @@unique([userId, period])
+}
+
+model BrandingConfig {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  displayName  String
+  logoUrl      String?
+  contactEmail String?
+  contactPhone String?
+  footerText   String?
+  primaryColor String   @default("#1F3864")
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id])
+}
+
+
+================================================================================
+PART 4 — NESTJS SOURCE CODE
+================================================================================
+
+--------------------------------------------------------------------------------
+File: apps/api/src/main.ts
+--------------------------------------------------------------------------------
+
+import { NestFactory } from '@nestjs/core';
+import { ValidationPipe } from '@nestjs/common';
+import { AppModule } from './app.module';
+import { PrismaService } from './prisma/prisma.service';
+import { ensureAdmin } from './auth/bootstrap-admin';
+import { AllExceptionsFilter } from './common/errors/all-exceptions.filter';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+  app.setGlobalPrefix('v1');
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      forbidNonWhitelisted: false,
+    }),
+  );
+  app.useGlobalFilters(new AllExceptionsFilter());
+  app.enableCors({ origin: true, credentials: true });
+  app.enableShutdownHooks();
+
+  await app.init();
+
+  const prisma = app.get(PrismaService);
+  await ensureAdmin(prisma);
+
+  const port = process.env.PORT ? Number(process.env.PORT) : 3000;
+  await app.listen(port);
+}
+
+bootstrap();
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/app.module.ts
+--------------------------------------------------------------------------------
+
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { PrismaModule } from './prisma/prisma.module';
+import { RateLimitModule } from './common/rate-limit/rate-limit.module';
+import { AuthModule } from './auth/auth.module';
+import { ProfilesModule } from './profiles/profiles.module';
+import { JdsModule } from './jds/jds.module';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    PrismaModule,
+    RateLimitModule,
+    AuthModule,
+    ProfilesModule,
+    JdsModule,
+  ],
+})
+export class AppModule {}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/prisma/prisma.module.ts
+--------------------------------------------------------------------------------
+
+import { Global, Module } from '@nestjs/common';
+import { PrismaService } from './prisma.service';
+
+@Global()
+@Module({
+  providers: [PrismaService],
+  exports: [PrismaService],
+})
+export class PrismaModule {}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/prisma/prisma.service.ts
+--------------------------------------------------------------------------------
+
+import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { PrismaClient } from '@prisma/client';
+
+@Injectable()
+export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+  async onModuleInit(): Promise<void> {
+    await this.$connect();
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    await this.$disconnect();
+  }
+}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/common/errors/app-error.ts
+--------------------------------------------------------------------------------
+
+export class AppError extends Error {
+  constructor(
+    public readonly code: string,
+    public readonly status: number,
+    message?: string,
+  ) {
+    super(message ?? code);
+    this.name = 'AppError';
+  }
+}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/common/errors/all-exceptions.filter.ts
+--------------------------------------------------------------------------------
+
+import {
+  ArgumentsHost,
+  Catch,
+  ExceptionFilter,
+  HttpException,
+} from '@nestjs/common';
+import type { Response } from 'express';
+import { AppError } from './app-error';
+
+@Catch()
+export class AllExceptionsFilter implements ExceptionFilter {
+  catch(exception: unknown, host: ArgumentsHost): void {
+    const ctx = host.switchToHttp();
+    const res = ctx.getResponse<Response>();
+
+    if (exception instanceof AppError) {
+      res.status(exception.status).json({
+        error: { code: exception.code, message: exception.message },
+      });
+      return;
+    }
+
+    if (exception instanceof HttpException) {
+      const status = exception.getStatus();
+      const response = exception.getResponse();
+      const message =
+        typeof response === 'string'
+          ? response
+          : ((response as { message?: string | string[] }).message ?? 'Request failed');
+      res.status(status).json({ error: { code: 'HTTP_ERROR', message } });
+      return;
+    }
+
+    // Never log request bodies or resume text.
+    console.error('[unhandled]', exception instanceof Error ? exception.message : exception);
+    res.status(500).json({
+      error: { code: 'INTERNAL_ERROR', message: 'Internal server error' },
+    });
+  }
+}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/common/rate-limit/redis.service.ts
+--------------------------------------------------------------------------------
+
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import Redis from 'ioredis';
+
+@Injectable()
+export class RedisService implements OnModuleDestroy {
+  private readonly client: Redis | null = null;
+
+  constructor() {
+    const url = process.env.REDIS_URL;
+    if (!url) return;
+
+    this.client = new Redis(url, {
+      lazyConnect: true,
+      maxRetriesPerRequest: 1,
+      enableOfflineQueue: false,
+    });
+    this.client.on('error', () => undefined);
+    this.client.connect().catch(() => undefined);
+  }
+
+  async incrWithTtl(key: string, ttlSeconds: number): Promise<number | null> {
+    if (!this.client || this.client.status !== 'ready') return null;
+    try {
+      const value = await this.client.incr(key);
+      if (value === 1) await this.client.expire(key, ttlSeconds);
+      return value;
+    } catch {
+      return null;
+    }
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    if (this.client) {
+      await this.client.quit().catch(() => undefined);
+    }
+  }
+}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/common/rate-limit/rate-limit.service.ts
+--------------------------------------------------------------------------------
+
+import { Injectable } from '@nestjs/common';
+import { AppError } from '../errors/app-error';
+import { RedisService } from './redis.service';
+
+@Injectable()
+export class RateLimitService {
+  constructor(private readonly redis: RedisService) {}
+
+  async consume(key: string, limit: number, ttlSeconds: number): Promise<void> {
+    const count = await this.redis.incrWithTtl(key, ttlSeconds);
+    if (count !== null && count > limit) {
+      throw new AppError('RATE_LIMITED', 429, 'Too many attempts. Try again later.');
+    }
+  }
+}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/common/rate-limit/rate-limit.module.ts
+--------------------------------------------------------------------------------
+
+import { Global, Module } from '@nestjs/common';
+import { RedisService } from './redis.service';
+import { RateLimitService } from './rate-limit.service';
+
+@Global()
+@Module({
+  providers: [RedisService, RateLimitService],
+  exports: [RedisService, RateLimitService],
+})
+export class RateLimitModule {}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/auth/auth.constants.ts
+--------------------------------------------------------------------------------
+
+import * as argon2 from 'argon2';
+import { createHash } from 'crypto';
+
+export const ARGON2_OPTIONS: argon2.Options = {
+  type: argon2.argon2id,
+  memoryCost: 65536, // 64 MB
+  timeCost: 3,
+  parallelism: 4,
+};
+
+export const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
+export const REFRESH_TOKEN_TTL_DAYS = 30;
+
+export function sha256(input: string): string {
+  return createHash('sha256').update(input).digest('hex');
+}
+
+export function assertPasswordPolicy(password: string): void {
+  const ok =
+    password.length >= 12 &&
+    /[A-Z]/.test(password) &&
+    /[a-z]/.test(password) &&
+    /[0-9]/.test(password) &&
+    /[^A-Za-z0-9]/.test(password);
+  if (!ok) {
+    throw new Error(
+      'Password must be at least 12 characters and contain upper, lower, digit and symbol.',
+    );
+  }
+}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/auth/auth.types.ts
+--------------------------------------------------------------------------------
+
+import type { UserRole } from '@prisma/client';
+
+export interface AuthUser {
+  id: string;
+  role: UserRole;
+  isAdmin: boolean;
+  jti?: string;
+}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/auth/bootstrap-admin.ts
+--------------------------------------------------------------------------------
+
+import type { PrismaClient } from '@prisma/client';
+import * as argon2 from 'argon2';
+import { ARGON2_OPTIONS } from './auth.constants';
+
+export async function ensureAdmin(prisma: PrismaClient): Promise<void> {
+  const email = process.env.ADMIN_EMAIL;
+  if (!email) return;
+
+  const existing = await prisma.user.findUnique({ where: { email } });
+
+  if (existing) {
+    if (!existing.isAdmin) {
+      await prisma.user.update({
+        where: { id: existing.id },
+        data: { isAdmin: true, adminUnlimited: true, role: 'ADMIN' },
+      });
+    }
+    return;
+  }
+
+  const password = process.env.ADMIN_SEED_PASSWORD;
+  if (!password) throw new Error('ADMIN_SEED_PASSWORD required on first boot');
+
+  await prisma.user.create({
+    data: {
+      email,
+      passwordHash: await argon2.hash(password, ARGON2_OPTIONS),
+      firstName: 'Victor',
+      lastName: 'Igboekwe',
+      role: 'ADMIN',
+      isAdmin: true,
+      adminUnlimited: true,
+      emailVerified: true,
+      mustChangePassword: process.env.NODE_ENV === 'production',
+    },
+  });
+}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/auth/dto/login.dto.ts
+--------------------------------------------------------------------------------
+
+import { IsEmail, IsString } from 'class-validator';
+
+export class LoginDto {
+  @IsEmail()
+  email!: string;
+
+  @IsString()
+  password!: string;
+}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/auth/auth.service.ts
+--------------------------------------------------------------------------------
+
+import { Injectable } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import * as argon2 from 'argon2';
+import { randomBytes, randomUUID } from 'crypto';
+import { PrismaService } from '../prisma/prisma.service';
+import { AppError } from '../common/errors/app-error';
+import { RateLimitService } from '../common/rate-limit/rate-limit.service';
+import { LoginDto } from './dto/login.dto';
+import { ensureAdmin } from './bootstrap-admin';
+import {
+  ACCESS_TOKEN_TTL_SECONDS,
+  REFRESH_TOKEN_TTL_DAYS,
+  sha256,
+} from './auth.constants';
+
+@Injectable()
+export class AuthService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly jwt: JwtService,
+    private readonly rateLimit: RateLimitService,
+  ) {}
+
+  async bootstrapAdmin(token?: string) {
+    if (!token) {
+      throw new AppError(
+        'BOOTSTRAP_TOKEN_REQUIRED',
+        401,
+        'X-Bootstrap-Token header is required.',
+      );
+    }
+
+    const count = await this.prisma.user.count();
+    const expected = process.env.ADMIN_BOOTSTRAP_TOKEN;
+
+    // Idempotent rule: succeeds when there are no users OR the token matches.
+    if (count > 0 && (!expected || token !== expected)) {
+      throw new AppError('FORBIDDEN', 403, 'Invalid bootstrap token.');
+    }
+
+    if (!process.env.ADMIN_EMAIL) {
+      throw new AppError(
+        'ADMIN_NOT_CONFIGURED',
+        500,
+        'ADMIN_EMAIL is not configured.',
+      );
+    }
+
+    await ensureAdmin(this.prisma);
+    return { ok: true, hadUsers: count > 0 };
+  }
+
+  async login(dto: LoginDto, ip?: string, userAgent?: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
+
+    // Admin: 5 attempts / 15 min / IP. Standard: 10 attempts / 15 min / IP.
+    await this.rateLimit.consume(
+      `login:${ip ?? 'unknown'}`,
+      user?.isAdmin ? 5 : 10,
+      15 * 60,
+    );
+
+    if (!user) {
+      throw new AppError('INVALID_CREDENTIALS', 401, 'Invalid email or password.');
+    }
+
+    const valid = await argon2.verify(user.passwordHash, dto.password);
+    if (!valid) {
+      throw new AppError('INVALID_CREDENTIALS', 401, 'Invalid email or password.');
+    }
+
+    const jti = randomUUID();
+    const accessToken = await this.jwt.signAsync(
+      {
+        sub: user.id,
+        role: user.role,
+        isAdmin: user.isAdmin,
+        jti,
+      },
+      { expiresIn: ACCESS_TOKEN_TTL_SECONDS },
+    );
+
+    const refreshToken = randomBytes(32).toString('base64url');
+    await this.prisma.session.create({
+      data: {
+        userId: user.id,
+        refreshHash: sha256(refreshToken),
+        userAgent,
+        ip,
+        expiresAt: new Date(
+          Date.now() + REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000,
+        ),
+      },
+    });
+
+    return {
+      accessToken,
+      refreshToken,
+      tokenType: 'Bearer',
+      expiresIn: ACCESS_TOKEN_TTL_SECONDS,
+    };
+  }
+
+  async me(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        isAdmin: true,
+        adminUnlimited: true,
+        emailVerified: true,
+        mustChangePassword: true,
+        firstName: true,
+        lastName: true,
+        themePref: true,
+        createdAt: true,
+      },
+    });
+    if (!user) throw new AppError('UNAUTHORIZED', 401);
+    return user;
+  }
+}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/auth/jwt-auth.guard.ts
+--------------------------------------------------------------------------------
+
+import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import type { Request } from 'express';
+import { AppError } from '../common/errors/app-error';
+import type { AuthUser } from './auth.types';
+
+@Injectable()
+export class JwtAuthGuard implements CanActivate {
+  constructor(private readonly jwt: JwtService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const req = context.switchToHttp().getRequest<Request & { user?: AuthUser }>();
+    const header = req.headers.authorization;
+
+    if (!header?.startsWith('Bearer ')) {
+      throw new AppError('UNAUTHORIZED', 401);
+    }
+
+    try {
+      const payload = await this.jwt.verifyAsync<{
+        sub: string;
+        role: AuthUser['role'];
+        isAdmin: boolean;
+        jti?: string;
+      }>(header.slice('Bearer '.length));
+
+      req.user = {
+        id: payload.sub,
+        role: payload.role,
+        isAdmin: payload.isAdmin,
+        jti: payload.jti,
+      };
+      return true;
+    } catch {
+      throw new AppError('UNAUTHORIZED', 401);
+    }
+  }
+}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/auth/current-user.decorator.ts
+--------------------------------------------------------------------------------
+
+import { createParamDecorator, ExecutionContext } from '@nestjs/common';
+import type { AuthUser } from './auth.types';
+
+export const CurrentUser = createParamDecorator(
+  (_data: unknown, ctx: ExecutionContext): AuthUser => {
+    return ctx.switchToHttp().getRequest().user as AuthUser;
+  },
+);
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/auth/auth.controller.ts
+--------------------------------------------------------------------------------
+
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import type { Request } from 'express';
+import { AuthService } from './auth.service';
+import { LoginDto } from './dto/login.dto';
+import { JwtAuthGuard } from './jwt-auth.guard';
+import { CurrentUser } from './current-user.decorator';
+import type { AuthUser } from './auth.types';
+
+@Controller('auth')
+export class AuthController {
+  constructor(private readonly auth: AuthService) {}
+
+  @Post('bootstrap-admin')
+  bootstrapAdmin(@Headers('x-bootstrap-token') token?: string) {
+    return this.auth.bootstrapAdmin(token);
+  }
+
+  @Post('login')
+  login(@Body() dto: LoginDto, @Req() req: Request) {
+    return this.auth.login(dto, req.ip, req.headers['user-agent']);
+  }
+
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  me(@CurrentUser() user: AuthUser) {
+    return this.auth.me(user.id);
+  }
+}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/auth/auth.module.ts
+--------------------------------------------------------------------------------
+
+import { Module } from '@nestjs/common';
+import { JwtModule } from '@nestjs/jwt';
+import { AuthController } from './auth.controller';
+import { AuthService } from './auth.service';
+import { JwtAuthGuard } from './jwt-auth.guard';
+
+@Module({
+  imports: [
+    JwtModule.registerAsync({
+      global: true,
+      useFactory: () => {
+        const secret = process.env.JWT_SECRET;
+        if (!secret) throw new Error('JWT_SECRET is required');
+        return {
+          secret,
+          signOptions: { algorithm: 'HS256' as const },
+        };
+      },
+    }),
+  ],
+  controllers: [AuthController],
+  providers: [AuthService, JwtAuthGuard],
+  exports: [JwtAuthGuard],
+})
+export class AuthModule {}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/profiles/dto/create-profile.dto.ts
+--------------------------------------------------------------------------------
+
+import {
+  ArrayNotEmpty,
+  IsArray,
+  IsBoolean,
+  IsEmail,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
+
+export class CreateProfileDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(120)
+  name!: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(160)
+  headerFullName!: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(120)
+  headerCity!: string;
+
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  headerPhones!: string[];
+
+  @IsEmail()
+  headerEmail!: string;
+
+  @IsOptional()
+  @IsString()
+  linkedIn?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isDefault?: boolean;
+}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/profiles/dto/update-profile.dto.ts
+--------------------------------------------------------------------------------
+
+import { PartialType } from '@nestjs/mapped-types';
+import { CreateProfileDto } from './create-profile.dto';
+
+export class UpdateProfileDto extends PartialType(CreateProfileDto) {}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/profiles/profiles.constants.ts
+--------------------------------------------------------------------------------
+
+// R18 — authoritative filename regex from Victor's sign-off.
+export const BASE_FILENAME_REGEX =
+  /^[a-zA-Z0-9\s\-_]+_[a-zA-Z0-9\s\-_]+_[a-zA-Z0-9\s\-_]+\.docx$/;
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/profiles/profiles.service.ts
+--------------------------------------------------------------------------------
+
+import { Injectable } from '@nestjs/common';
+import { Prisma, UserRole } from '@prisma/client';
+import * as mammoth from 'mammoth';
+import { PrismaService } from '../prisma/prisma.service';
+import { AppError } from '../common/errors/app-error';
+import type { AuthUser } from '../auth/auth.types';
+import { CreateProfileDto } from './dto/create-profile.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import { BASE_FILENAME_REGEX } from './profiles.constants';
+
+const PROFILE_LIMITS: Record<UserRole, number | null> = {
+  USER: 1,
+  PRO: 3,
+  AGENCY: null,
+  ADMIN: null,
+};
+
+@Injectable()
+export class ProfilesService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async create(user: AuthUser, dto: CreateProfileDto) {
+    const limit = PROFILE_LIMITS[user.role];
+    const count = await this.prisma.profile.count({
+      where: { userId: user.id },
+    });
+
+    if (limit !== null && count >= limit) {
+      throw new AppError(
+        'PROFILE_LIMIT_REACHED',
+        402,
+        `Your plan allows ${limit} profile(s).`,
+      );
+    }
+
+    const isDefault = dto.isDefault ?? count === 0;
+
+    return this.prisma.$transaction(async (tx) => {
+      if (isDefault) {
+        await tx.profile.updateMany({
+          where: { userId: user.id, isDefault: true },
+          data: { isDefault: false },
+        });
+      }
+
+      return tx.profile.create({
+        data: {
+          userId: user.id,
+          name: dto.name,
+          headerFullName: dto.headerFullName,
+          headerCity: dto.headerCity,
+          headerPhones: dto.headerPhones,
+          headerEmail: dto.headerEmail,
+          linkedIn: dto.linkedIn ?? null,
+          isDefault,
+        },
+      });
+    });
+  }
+
+  findAll(user: AuthUser) {
+    return this.prisma.profile.findMany({
+      where: { userId: user.id },
+      orderBy: { id: 'asc' },
+      include: { settings: true },
+    });
+  }
+
+  async update(user: AuthUser, profileId: string, dto: UpdateProfileDto) {
+    await this.getOwnedProfile(user, profileId);
+
+    const data: Prisma.ProfileUpdateInput = {};
+    if (dto.name !== undefined) data.name = dto.name;
+    if (dto.headerFullName !== undefined) data.headerFullName = dto.headerFullName;
+    if (dto.headerCity !== undefined) data.headerCity = dto.headerCity;
+    if (dto.headerPhones !== undefined) data.headerPhones = dto.headerPhones;
+    if (dto.headerEmail !== undefined) data.headerEmail = dto.headerEmail;
+    if (dto.linkedIn !== undefined) data.linkedIn = dto.linkedIn;
+
+    return this.prisma.$transaction(async (tx) => {
+      if (dto.isDefault === true) {
+        await tx.profile.updateMany({
+          where: { userId: user.id, isDefault: true },
+          data: { isDefault: false },
+        });
+        data.isDefault = true;
+      } else if (dto.isDefault === false) {
+        data.isDefault = false;
+      }
+
+      return tx.profile.update({ where: { id: profileId }, data });
+    });
+  }
+
+  async uploadBase(
+    user: AuthUser,
+    profileId: string,
+    file?: Express.Multer.File,
+  ) {
+    if (!file) throw new AppError('FILE_REQUIRED', 400, 'A .docx file is required.');
+    await this.getOwnedProfile(user, profileId);
+
+    if (!BASE_FILENAME_REGEX.test(file.originalname)) {
+      throw new AppError(
+        'INVALID_FILENAME',
+        422,
+        'Filename must match: First_Last_Role.docx (R18).',
+      );
+    }
+
+    const { value } = await mammoth.extractRawText({ buffer: file.buffer });
+    const text = value.trim();
+    if (!text) throw new AppError('EMPTY_DOCUMENT', 422, 'The document contains no extractable text.');
+
+    const last = await this.prisma.baseResume.findFirst({
+      where: { profileId },
+      orderBy: { version: 'desc' },
+      select: { version: true },
+    });
+    const version = (last?.version ?? 0) + 1;
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.baseResume.updateMany({
+        where: { profileId, isActive: true },
+        data: { isActive: false },
+      });
+
+      const base = await tx.baseResume.create({
+        data: {
+          profileId,
+          version,
+          fileName: file.originalname,
+          parsedJson: { text, chars: text.length },
+          isActive: true,
+        },
+      });
+
+      await tx.profile.update({
+        where: { id: profileId },
+        data: { activeBaseId: base.id },
+      });
+
+      return base;
+    });
+  }
+
+  private async getOwnedProfile(user: AuthUser, profileId: string) {
+    const profile = await this.prisma.profile.findFirst({
+      where: { id: profileId, userId: user.id },
+    });
+    if (!profile) throw new AppError('PROFILE_NOT_FOUND', 404);
+    return profile;
+  }
+}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/profiles/profiles.controller.ts
+--------------------------------------------------------------------------------
+
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { CurrentUser } from '../auth/current-user.decorator';
+import type { AuthUser } from '../auth/auth.types';
+import { ProfilesService } from './profiles.service';
+import { CreateProfileDto } from './dto/create-profile.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+
+@Controller('profiles')
+@UseGuards(JwtAuthGuard)
+export class ProfilesController {
+  constructor(private readonly profiles: ProfilesService) {}
+
+  @Post()
+  create(@CurrentUser() user: AuthUser, @Body() dto: CreateProfileDto) {
+    return this.profiles.create(user, dto);
+  }
+
+  @Get()
+  findAll(@CurrentUser() user: AuthUser) {
+    return this.profiles.findAll(user);
+  }
+
+  @Patch(':id')
+  update(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    return this.profiles.update(user, id, dto);
+  }
+
+  @Post(':id/bases')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }),
+  )
+  uploadBase(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    return this.profiles.uploadBase(user, id, file);
+  }
+}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/profiles/profiles.module.ts
+--------------------------------------------------------------------------------
+
+import { Module } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module';
+import { ProfilesController } from './profiles.controller';
+import { ProfilesService } from './profiles.service';
+
+@Module({
+  imports: [AuthModule],
+  controllers: [ProfilesController],
+  providers: [ProfilesService],
+})
+export class ProfilesModule {}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/jds/dto/create-jd.dto.ts
+--------------------------------------------------------------------------------
+
+import { IsIn, IsOptional, IsString, IsUUID } from 'class-validator';
+
+export class CreateJdDto {
+  @IsUUID()
+  profileId!: string;
+
+  @IsOptional()
+  @IsIn(['paste', 'url', 'file'])
+  sourceType?: 'paste' | 'url' | 'file';
+
+  @IsOptional()
+  @IsString()
+  text?: string;
+
+  @IsOptional()
+  @IsString()
+  url?: string;
+}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/jds/jds.service.ts
+--------------------------------------------------------------------------------
+
+import { Injectable } from '@nestjs/common';
+import * as cheerio from 'cheerio';
+import * as mammoth from 'mammoth';
+import { PrismaService } from '../prisma/prisma.service';
+import { AppError } from '../common/errors/app-error';
+import type { AuthUser } from '../auth/auth.types';
+import { CreateJdDto } from './dto/create-jd.dto';
+
+const MIN_JD_CHARS = 200;
+
+@Injectable()
+export class JdsService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async create(
+    user: AuthUser,
+    dto: CreateJdDto,
+    file?: Express.Multer.File,
+  ) {
+    const profile = await this.prisma.profile.findFirst({
+      where: { id: dto.profileId, userId: user.id },
+    });
+    if (!profile) throw new AppError('PROFILE_NOT_FOUND', 404);
+
+    const sourceType = file ? 'file' : dto.sourceType;
+    if (!sourceType) {
+      throw new AppError('SOURCE_TYPE_REQUIRED', 400, 'sourceType is required.');
+    }
+
+    let text: string;
+    if (sourceType === 'paste') {
+      if (!dto.text) throw new AppError('JD_TEXT_REQUIRED', 400);
+      text = dto.text;
+    } else if (sourceType === 'url') {
+      if (!dto.url) throw new AppError('JD_URL_REQUIRED', 400);
+      text = await this.fetchUrlText(dto.url);
+    } else {
+      if (!file) throw new AppError('JD_FILE_REQUIRED', 400);
+      text = await this.fileText(file);
+    }
+
+    text = this.normalize(text);
+    if (text.length < MIN_JD_CHARS) {
+      throw new AppError(
+        'JD_UNUSABLE',
+        422,
+        `Extracted job description must contain at least ${MIN_JD_CHARS} characters.`,
+      );
+    }
+
+    const jd = await this.prisma.jobDescription.create({
+      data: {
+        userId: user.id,
+        profileId: profile.id,
+        sourceType,
+        sourceUrl: dto.url ?? null,
+        sourceFileName: file?.originalname ?? null,
+        rawText: text,
+        extractedChars: text.length,
+        status: 'EXTRACTED',
+      },
+    });
+
+    return {
+      id: jd.id,
+      status: jd.status,
+      sourceType: jd.sourceType,
+      extractedChars: jd.extractedChars,
+      createdAt: jd.createdAt,
+    };
+  }
+
+  async findOne(user: AuthUser, id: string) {
+    const jd = await this.prisma.jobDescription.findFirst({
+      where: { id, userId: user.id },
+    });
+    if (!jd) throw new AppError('JD_NOT_FOUND', 404);
+    return jd;
+  }
+
+  private async fetchUrlText(rawUrl: string): Promise<string> {
+    let url: URL;
+    try {
+      url = new URL(rawUrl);
+    } catch {
+      throw new AppError('INVALID_URL', 400, 'Invalid URL.');
+    }
+    if (!['http:', 'https:'].includes(url.protocol)) {
+      throw new AppError('INVALID_URL', 400, 'Only http/https URLs are supported.');
+    }
+
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(10_000),
+      headers: { 'user-agent': 'ResumeEngineBot/1.0' },
+    });
+    if (!res.ok) {
+      throw new AppError('URL_FETCH_FAILED', 422, `URL returned ${res.status}.`);
+    }
+
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    $('script, style, noscript, svg').remove();
+    return $('body').text();
+  }
+
+  private async fileText(file: Express.Multer.File): Promise<string> {
+    const name = file.originalname.toLowerCase();
+    if (name.endsWith('.docx')) {
+      const { value } = await mammoth.extractRawText({ buffer: file.buffer });
+      return value;
+    }
+    if (name.endsWith('.txt')) {
+      return file.buffer.toString('utf8');
+    }
+    throw new AppError(
+      'UNSUPPORTED_FILE',
+      422,
+      'Only .docx and .txt files are supported.',
+    );
+  }
+
+  private normalize(input: string): string {
+    return input
+      .replace(/\r\n/g, '\n')
+      .replace(/\u00a0/g, ' ')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/jds/jds.controller.ts
+--------------------------------------------------------------------------------
+
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { CurrentUser } from '../auth/current-user.decorator';
+import type { AuthUser } from '../auth/auth.types';
+import { JdsService } from './jds.service';
+import { CreateJdDto } from './dto/create-jd.dto';
+
+@Controller('jds')
+@UseGuards(JwtAuthGuard)
+export class JdsController {
+  constructor(private readonly jds: JdsService) {}
+
+  @Post()
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }),
+  )
+  create(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: CreateJdDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    return this.jds.create(user, dto, file);
+  }
+
+  @Get(':id')
+  findOne(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.jds.findOne(user, id);
+  }
+}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/jds/jds.module.ts
+--------------------------------------------------------------------------------
+
+import { Module } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module';
+import { JdsController } from './jds.controller';
+import { JdsService } from './jds.service';
+
+@Module({
+  imports: [AuthModule],
+  controllers: [JdsController],
+  providers: [JdsService],
+})
+export class JdsModule {}
+
+
+--------------------------------------------------------------------------------
+File: apps/api/src/runs/base-resume.util.ts
+--------------------------------------------------------------------------------
+/**
+ * Required by the Stage 1 schema contract:
+ * Run.baseResumeId is required. When POST /runs is implemented (Stage 2),
+ * call this helper so a missing baseResumeId defaults to the profile's
+ * active BaseResume (isActive = true).
+ */
+
+import { PrismaService } from '../prisma/prisma.service';
+import { AppError } from '../common/errors/app-error';
+
+export async function resolveBaseResumeId(
+  prisma: PrismaService,
+  profileId: string,
+  provided?: string | null,
+): Promise<string> {
+  if (provided) return provided;
+
+  const active = await prisma.baseResume.findFirst({
+    where: { profileId, isActive: true },
+    orderBy: { version: 'desc' },
+  });
+
+  if (!active) {
+    throw new AppError(
+      'BASE_RESUME_REQUIRED',
+      422,
+      'No active base resume exists for this profile.',
+    );
+  }
+
+  return active.id;
+}
+
+
+================================================================================
+PART 5 — BUILD / VERIFICATION COMMANDS
+================================================================================
+
+cd apps/api
+
+# Validate and apply schema
+npx prisma format
+npx prisma validate
+npx prisma migrate dev --name init
+npx prisma generate
+
+# Compile
+npm run build
+
+# Run
+npm run start:dev
+
+# Smoke tests (replace values)
+curl -X POST http://localhost:3000/v1/auth/bootstrap-admin \
+  -H "X-Bootstrap-Token: $ADMIN_BOOTSTRAP_TOKEN"
+
+curl -X POST http://localhost:3000/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"Whinkproducts@gmail.com","password":"<seed-password>"}'
+
+curl http://localhost:3000/v1/auth/me \
+  -H "Authorization: Bearer <access-token>"
+
+curl -X POST http://localhost:3000/v1/profiles \
+  -H "Authorization: Bearer <access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name":"Primary",
+    "headerFullName":"Victor Igboekwe",
+    "headerCity":"Lagos, Nigeria",
+    "headerPhones":["+234..."],
+    "headerEmail":"you@example.com"
+  }'
+
+curl -X POST http://localhost:3000/v1/profiles/<profile-id>/bases \
+  -H "Authorization: Bearer <access-token>" \
+  -F "file=@Victor_Igboekwe_Product.docx"
+
+curl -X POST http://localhost:3000/v1/jds \
+  -H "Authorization: Bearer <access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "profileId":"<profile-id>",
+    "sourceType":"paste",
+    "text":"<at least 200 characters of JD text>"
+  }'
+
+curl http://localhost:3000/v1/jds/<jd-id> \
+  -H "Authorization: Bearer <access-token>"
+
+
+================================================================================
+END OF DOCUMENT
+================================================================================
