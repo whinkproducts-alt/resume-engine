@@ -374,6 +374,16 @@ describe('FACTS', () => {
     expect(loose[0]?.blocking).toBe(false);
     expect(loose[0]?.severity).toBe('warn');
   });
+  it('does not let a short number be grounded by a longer one (no substring matching)', async () => {
+    const flags = await run('FACTS', withBullet('Cut onboarding time by 4%.'));
+    expect(codes(flags)).toEqual(['FACT_BANK_MISS']);
+  });
+  it('matches a magnitude suffix through an alias', async () => {
+    const ctx = withBullet('Reached 2M users.');
+    ctx.factBank = [{ id: 'f9', kind: 'metric', value: '2 million users', numeric: 2, unit: 'users',
+      aliases: ['2M'], verified: true }];
+    expect(await run('FACTS', ctx)).toEqual([]);
+  });
   it('ignores bare years', async () => {
     expect(await run('FACTS', withBullet('Joined in 2019 to lead delivery.'))).toEqual([]);
   });

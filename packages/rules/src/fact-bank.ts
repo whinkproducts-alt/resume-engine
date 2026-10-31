@@ -77,11 +77,12 @@ export function matchNumericToken(
     }
   }
 
-  // 3. alias containment on non-metric facts (e.g. years in date facts)
-  const needle = token.raw.toLowerCase();
+  // 3. exact surface-form or alias match (e.g. "2M" for 2,000,000, years in date facts).
+  //    Exact only: substring matching would let "5" be grounded by "50%".
+  const needle = token.raw.trim().toLowerCase();
   for (const e of factBank) {
-    const surfaces = [e.value, ...(e.aliases ?? [])].map((s) => s.toLowerCase());
-    if (surfaces.some((s) => s === needle || s.includes(needle) || needle.includes(s))) {
+    const surfaces = [e.value, ...(e.aliases ?? [])].map((s) => s.trim().toLowerCase());
+    if (surfaces.includes(needle)) {
       return { token, entry: e, via: 'alias', verified: e.verified };
     }
   }

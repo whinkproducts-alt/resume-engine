@@ -41,6 +41,8 @@ export interface PipelineDeps {
     docxKey: string; pdfKey: string; pageCount: number;
     docxSize: number; pdfSize: number;
   }) => Promise<void>;
+  /** Called as the run moves into Stage 7 and Stage 8, so the caller can update Run.status. */
+  onStage?: (stage: 'RENDERING' | 'EXPORTING_PDF') => Promise<void>;
   /** Overrides the LibreOffice binary path (defaults to SOFFICE_PATH / PATH lookup). */
   sofficePath?: string;
 }
@@ -120,10 +122,12 @@ export async function runStages6to8(
   /* ------------------------------ Stage 7 ------------------------------- */
 
   const resume = retry.resume;
+  await deps.onStage?.('RENDERING');
   const { buffer: docx } = await renderResumeDocx(resume, { branding: input.branding ?? null });
 
   /* ------------------------------ Stage 8 ------------------------------- */
 
+  await deps.onStage?.('EXPORTING_PDF');
   const qa = await runPdfQa(docx, {
     maxPages: config.maxPages,
     runId: input.runId,
