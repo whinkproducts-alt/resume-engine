@@ -5,10 +5,11 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Button, Card, Input, Spinner } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
+import { DEFAULT_DOCUMENT_ACCENT } from "@/lib/document-colors";
 import { errMsg } from "@/lib/run-status";
 import type { Branding } from "@/lib/types";
 
-const DEFAULT_COLOR = "#1F3864";
+const DEFAULT_COLOR = DEFAULT_DOCUMENT_ACCENT;
 
 export default function AgencyBrandingPage() {
   const qc = useQueryClient();
@@ -74,7 +75,7 @@ export default function AgencyBrandingPage() {
               onChange={(e) => setForm((f) => ({ ...f, primaryColor: e.target.value.toUpperCase() }))}
               className="h-9 w-12 cursor-pointer rounded border border-border bg-bg-2"
             />
-            <Input value={form.primaryColor} onChange={set("primaryColor")} placeholder="#1F3864" />
+            <Input value={form.primaryColor} onChange={set("primaryColor")} placeholder={DEFAULT_COLOR} />
           </div>
         </div>
         <Input placeholder="Footer text" value={form.footerText} onChange={set("footerText")} />
