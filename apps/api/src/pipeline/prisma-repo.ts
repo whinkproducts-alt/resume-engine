@@ -150,8 +150,9 @@ export class PrismaPipelineRepo implements PipelineRepo {
     status: RunStatusName,
     patch: Parameters<PipelineRepo['setStatus']>[2] = {},
   ): Promise<void> {
-    await this.prisma.run.update({
-      where: { id: runId },
+    // A user cancellation wins over any later status write from the worker.
+    await this.prisma.run.updateMany({
+      where: { id: runId, ...(status === 'CANCELLED' ? {} : { NOT: { status: 'CANCELLED' } }) },
       data: {
         status,
         ...(patch.stage !== undefined ? { stage: patch.stage } : {}),
@@ -228,8 +229,8 @@ export class PrismaPipelineRepo implements PipelineRepo {
   async saveCompletion(runId: string, rec: CompletionRecord): Promise<void> {
     const targets = rec.outputJson.targetCompanies;
     await this.prisma.$transaction([
-      this.prisma.run.update({
-        where: { id: runId },
+      this.prisma.run.updateMany({
+        where: { id: runId, NOT: { status: 'CANCELLED' } },
         data: {
           status: rec.status,
           stage: rec.status === 'COMPLETE' ? 'complete' : 'needs review',

@@ -55,6 +55,11 @@
     "@types/qrcode": "^1.5.5",
     "prisma": "^5.22.0",
     "typescript": "^5.5.4",
-    "vitest": "^2.0.5"
+    "vitest": "^2.0.5",
+    "@nestjs/testing": "^10.4.0",
+    "supertest": "^7.0.0",
+    "@types/supertest": "^6.0.2",
+    "unplugin-swc": "^1.5.1",
+    "@swc/core": "^1.7.0"
   }
 }

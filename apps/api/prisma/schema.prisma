@@ -41,6 +41,11 @@ model User {
   lastName          String?
   themePref         String   @default("SYSTEM")
   stripeCustomerId  String?  @unique
+  // Admin 2FA (POST /admin/2fa/enroll). Added in migration 20261031010000_admin_2fa.
+  // totpSecretEnc is AES-256-GCM ciphertext; recovery codes are stored as SHA-256 hashes.
+  totpSecretEnc      String?
+  totpEnabledAt      DateTime?
+  totpRecoveryHashes String[]
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
