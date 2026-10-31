@@ -19,6 +19,8 @@ pnpm --filter @resume-engine/api build && pnpm --filter @resume-engine/api worke
 pnpm --filter @resume-engine/web dev            # web on :3000
 ```
 
+Put single quotes around `ADMIN_SEED_PASSWORD` if it contains symbols such as `&`, `$`, `#` or `;`.
+
 `apps/api/.env` needs at least `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `ADMIN_EMAIL`, `ADMIN_SEED_PASSWORD` (the admin is created on first API start), and for the worker `LLM_API_KEY`, `LLM_MODEL_ANALYZE`, `LLM_MODEL_WRITE`, and the `S3_*` values. Admin 2FA also needs `TOTP_ENCRYPTION_KEY` (32 random bytes, base64).
 
 First run, as the admin: create a profile, upload a base résumé named like `Jane Doe_Product_Acme.docx`, enter the roster on the profile page, then start a run.

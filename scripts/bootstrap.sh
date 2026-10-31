@@ -10,7 +10,8 @@ echo "Edit apps/api/.env (JWT_SECRET, ADMIN_SEED_PASSWORD, LLM_*, S3_*, TOTP_ENC
 docker compose -f infrastructure/docker/docker-compose.yml up -d --wait
 
 cd apps/api
-set -a; . ./.env; set +a
+# Prisma reads apps/api/.env itself. Do not source it here: values such as a password with & or $,
+# or the <account_id> in an example URL, are not valid shell.
 pnpm exec prisma migrate deploy
 pnpm exec prisma generate
-echo "Ready. Run: pnpm dev"
+echo "Ready. Next: pnpm build, then run the API, the worker and the web app (see docs/ONBOARDING.md)."
