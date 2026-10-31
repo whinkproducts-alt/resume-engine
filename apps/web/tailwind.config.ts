@@ -1,21 +1,27 @@
 import type { Config } from "tailwindcss";
 
+const token = (name: string) =>
+  `color-mix(in srgb, var(--${name}) calc(<alpha-value> * 100%), transparent)`;
+
 const config: Config = {
   content: ["./src/**/*.{ts,tsx,mdx}"],
   theme: {
     extend: {
+      // Tailwind cannot apply opacity modifiers (bg-gold/10, border-danger/40) to a bare
+      // var(--x). Wrapping each token with <alpha-value> keeps the hex design tokens in
+      // globals.css untouched while making those modifiers work.
       colors: {
-        bg:        "var(--bg)",
-        "bg-2":    "var(--bg-2)",
-        "bg-3":    "var(--bg-3)",
-        surface:   "var(--surface)",
-        border:    "var(--border)",
-        fg:        "var(--fg)",
-        "fg-2":    "var(--fg-2)",
-        gold:      "var(--gold)",
-        "gold-2":  "var(--gold-2)",
-        success:   "var(--success)",
-        danger:    "var(--danger)",
+        bg:        token("bg"),
+        "bg-2":    token("bg-2"),
+        "bg-3":    token("bg-3"),
+        surface:   token("surface"),
+        border:    token("border"),
+        fg:        token("fg"),
+        "fg-2":    token("fg-2"),
+        gold:      token("gold"),
+        "gold-2":  token("gold-2"),
+        success:   token("success"),
+        danger:    token("danger"),
       },
       fontFamily: {
         sans: ["Outfit", "ui-sans-serif", "system-ui", "sans-serif"],

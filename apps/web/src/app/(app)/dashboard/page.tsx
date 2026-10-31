@@ -2,15 +2,16 @@
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { api } from "@/lib/api";
-import { Card, EmptyState, Button, Skeleton, Badge } from "@/components/ui";
-import type { Run } from "@/lib/types";
 import { formatDistanceToNow } from "date-fns";
+import { api } from "@/lib/api";
+import { Badge, Button, Card, EmptyState, Skeleton } from "@/components/ui";
+import { STATUS_LABEL, runHref, statusTone } from "@/lib/run-status";
+import type { Paged, RunListItem } from "@/lib/types";
 
 export default function DashboardPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["runs", "recent"],
-    queryFn: () => api.get<{ items: Run[] }>("/api/runs?limit=5"),
+    queryFn: () => api.get<Paged<RunListItem>>("/runs?limit=5"),
   });
 
   const runs = data?.items ?? [];
@@ -40,17 +41,18 @@ export default function DashboardPage() {
       ) : (
         <div className="grid gap-3">
           {runs.map((r) => (
-            <Link key={r.id} href={`/runs/${r.id}`}>
+            <Link key={r.id} href={runHref(r)}>
               <Card className="flex items-center justify-between p-5 transition-colors hover:bg-bg-3">
                 <div>
-                  <div className="font-medium">{r.profileName} — {r.companyGuess?.name ?? "—"}</div>
+                  <div className="font-medium">
+                    {r.profileName}{r.company ? ` for ${r.company}` : ""}
+                  </div>
                   <div className="mt-1 text-xs text-fg-2">
+                    {r.roleTitle ? `${r.roleTitle} · ` : ""}
                     {formatDistanceToNow(new Date(r.createdAt), { addSuffix: true })}
                   </div>
                 </div>
-                <Badge tone={r.status === "review" ? "ok" : r.status === "failed" ? "fail" : "idle"}>
-                  {r.status}
-                </Badge>
+                <Badge tone={statusTone(r.status)}>{STATUS_LABEL[r.status]}</Badge>
               </Card>
             </Link>
           ))}

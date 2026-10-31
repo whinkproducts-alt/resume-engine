@@ -6,7 +6,7 @@ import {
   LayoutDashboard, UserSquare2, FilePlus2, History, Settings, Building2,
   Shield, LogOut,
 } from "lucide-react";
-import { useAuth } from "@/lib/auth";
+import { displayName, useAuth } from "@/lib/auth";
 import { clsx } from "clsx";
 
 const NAV = [
@@ -23,6 +23,7 @@ const ADMIN_NAV = [
   { href: "/admin/runs",      label: "Runs",      icon: History },
   { href: "/admin/audit",     label: "Audit",     icon: Shield },
   { href: "/admin/reproduce", label: "Reproduce", icon: History },
+  { href: "/admin/2fa",       label: "Two factor", icon: Shield },
 ];
 
 export function AppShell({ children, admin = false }: { children: React.ReactNode; admin?: boolean }) {
@@ -61,7 +62,7 @@ export function AppShell({ children, admin = false }: { children: React.ReactNod
 
         <div className="border-t border-border p-3">
           <div className="mb-2 truncate text-xs text-fg-2">
-            {user?.name ?? "—"} <span className="text-fg-2/60">· {user?.role}</span>
+            {displayName(user)} <span className="text-fg-2/60">· {user?.role}</span>
           </div>
           <button
             onClick={() => void logout()}

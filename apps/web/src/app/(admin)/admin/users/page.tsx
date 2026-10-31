@@ -3,27 +3,19 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Badge, Card, Skeleton } from "@/components/ui";
-
-interface AdminUserRow {
-  id: string;
-  name: string;
-  email: string;
-  role: "owner" | "admin" | "member";
-  runsThisMonth: number;
-  runsLimit: number;
-}
+import type { AdminUserRow, Paged } from "@/lib/types";
 
 export default function AdminUsersPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["admin", "users"],
-    queryFn: () => api.get<{ items: AdminUserRow[] }>("/api/admin/users"),
+    queryFn: () => api.get<Paged<AdminUserRow>>("/admin/users?limit=100"),
   });
 
   return (
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Users</h1>
-        <p className="mt-1 text-sm text-fg-2">Roles and monthly usage.</p>
+        <p className="mt-1 text-sm text-fg-2">Accounts, plans and usage this month.</p>
       </header>
 
       <Card className="overflow-hidden">
@@ -33,23 +25,26 @@ export default function AdminUsersPage() {
           <table className="w-full text-sm">
             <thead className="bg-bg-2 text-left text-xs uppercase tracking-wide text-fg-2">
               <tr>
-                <th className="px-4 py-3">Name</th>
-                <th className="px-4 py-3">Email</th>
-                <th className="px-4 py-3">Role</th>
-                <th className="px-4 py-3">Runs (month)</th>
+                <th className="px-4 py-3">User</th>
+                <th className="px-4 py-3">Plan</th>
+                <th className="px-4 py-3">Runs this month</th>
+                <th className="px-4 py-3">2FA</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {data?.items.map((u) => (
-                <tr key={u.id} className="hover:bg-bg-3/40">
-                  <td className="px-4 py-3">{u.name}</td>
-                  <td className="px-4 py-3 text-fg-2">{u.email}</td>
+                <tr key={u.id}>
                   <td className="px-4 py-3">
-                    <Badge tone={u.role === "owner" ? "ok" : u.role === "admin" ? "warn" : "idle"}>
-                      {u.role}
-                    </Badge>
+                    <div>{u.name ?? u.email}</div>
+                    {u.name && <div className="text-xs text-fg-2">{u.email}</div>}
                   </td>
-                  <td className="px-4 py-3 text-fg-2">{u.runsThisMonth} / {u.runsLimit}</td>
+                  <td className="px-4 py-3"><Badge tone={u.isAdmin ? "warn" : "idle"}>{u.role}</Badge></td>
+                  <td className="px-4 py-3 tabular-nums">
+                    {u.runsThisMonth}{u.runsLimit !== null ? ` / ${u.runsLimit}` : ""}
+                  </td>
+                  <td className="px-4 py-3">
+                    {u.isAdmin ? <Badge tone={u.totpEnabled ? "ok" : "warn"}>{u.totpEnabled ? "On" : "Off"}</Badge> : "—"}
+                  </td>
                 </tr>
               ))}
             </tbody>

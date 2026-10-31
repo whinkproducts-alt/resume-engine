@@ -1,28 +1,30 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import { api } from "@/lib/api";
-import { Button, Card, Input } from "@/components/ui";
-import type { Run } from "@/lib/types";
+import { Badge, Button, Card, Input } from "@/components/ui";
+import { STATUS_LABEL, errMsg, statusTone } from "@/lib/run-status";
+import type { AdminRunDetail } from "@/lib/types";
 
-export default function AdminReproducePage() {
-  const [runId, setRunId] = useState("");
-  const [bootstrapToken, setBootstrapToken] = useState("");
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-  const { data: original } = useQuery({
-    queryKey: ["admin", "run", runId],
-    queryFn: () => api.get<Run>(`/api/admin/runs/${runId}`),
-    enabled: runId.length > 0,
+function ReproduceInner() {
+  const params = useSearchParams();
+  const [runId, setRunId] = useState(params.get("run") ?? "");
+  const valid = UUID.test(runId.trim());
+
+  const { data, isError, error } = useQuery({
+    queryKey: ["admin", "run", runId.trim()],
+    queryFn: () => api.get<AdminRunDetail>(`/admin/runs/${runId.trim()}`),
+    enabled: valid,
+    retry: false,
   });
 
   const reproduce = useMutation({
-    mutationFn: () =>
-      api.post<Run>(
-        `/api/admin/runs/${runId}/reproduce`,
-        {},
-        { extraHeaders: { "X-Bootstrap-Token": bootstrapToken } }
-      ),
+    mutationFn: () => api.post<{ runId: string; status: string }>(`/admin/runs/${runId.trim()}/reproduce`),
   });
 
   return (
@@ -30,51 +32,53 @@ export default function AdminReproducePage() {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Reproduce run</h1>
         <p className="mt-1 text-sm text-fg-2">
-          Re-execute a run with pinned model and ruleset versions.
+          Re-execute a run with its pinned rule set, prompt version, base résumé and settings.
+          The new run belongs to you; the original is not touched.
         </p>
       </header>
 
       <Card className="space-y-4 p-6">
         <div>
           <label className="mb-2 block text-xs uppercase tracking-wide text-fg-2">Run ID</label>
-          <Input value={runId} onChange={(e) => setRunId(e.target.value)} placeholder="run_…" />
+          <Input value={runId} onChange={(e) => setRunId(e.target.value)} placeholder="00000000-0000-0000-0000-000000000000" />
+          {isError && <p className="mt-2 text-xs text-danger">{errMsg(error)}</p>}
         </div>
 
-        <div>
-          <label className="mb-2 block text-xs uppercase tracking-wide text-fg-2">
-            Bootstrap token (X-Bootstrap-Token)
-          </label>
-          <Input
-            type="password"
-            value={bootstrapToken}
-            onChange={(e) => setBootstrapToken(e.target.value)}
-            placeholder="bootstrap token"
-          />
-        </div>
-
-        {original && (
-          <div className="rounded-lg bg-bg-2 p-4 text-sm text-fg-2">
-            <div><span className="text-fg-2">Profile: </span>{original.profileName}</div>
-            <div><span className="text-fg-2">Status: </span>{original.status}</div>
-            <div><span className="text-fg-2">Created: </span>{original.createdAt}</div>
+        {data && (
+          <div className="space-y-3 rounded-lg bg-bg-2 p-4 text-sm">
+            <div className="flex items-center gap-2">
+              <Badge tone={statusTone(data.run.status)}>{STATUS_LABEL[data.run.status]}</Badge>
+              <span className="text-fg-2">{data.run.planTier} plan · {data.logs.length} log steps · {data.flags.length} flags</span>
+            </div>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+              <dt className="text-fg-2">Rule set</dt><dd>{data.versions.ruleSet}</dd>
+              <dt className="text-fg-2">Prompts</dt><dd>{data.versions.promptVersion}</dd>
+              <dt className="text-fg-2">Base résumé</dt><dd>v{data.versions.baseResume ?? "?"}</dd>
+              <dt className="text-fg-2">Models</dt><dd>{data.versions.models.join(", ") || "—"}</dd>
+            </dl>
           </div>
         )}
 
-        <Button
-          disabled={!runId || !bootstrapToken}
-          loading={reproduce.isPending}
-          onClick={() => reproduce.mutate()}
-        >
-          Reproduce with pinned versions
-        </Button>
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-danger">{reproduce.isError ? errMsg(reproduce.error) : ""}</p>
+          <Button loading={reproduce.isPending} disabled={!data} onClick={() => reproduce.mutate()}>Reproduce</Button>
+        </div>
 
         {reproduce.data && (
-          <p className="text-sm text-success">New run created: {reproduce.data.id}</p>
-        )}
-        {reproduce.isError && (
-          <p className="text-sm text-danger">{(reproduce.error as Error).message}</p>
+          <p className="text-sm text-success">
+            Started run{" "}
+            <Link className="underline" href={`/runs/${reproduce.data.runId}`}>{reproduce.data.runId.slice(0, 8)}</Link>.
+          </p>
         )}
       </Card>
     </div>
+  );
+}
+
+export default function ReproducePage() {
+  return (
+    <Suspense fallback={null}>
+      <ReproduceInner />
+    </Suspense>
   );
 }

@@ -5,42 +5,74 @@ import Link from "next/link";
 import { useState } from "react";
 import { api } from "@/lib/api";
 import { Button, Card, EmptyState, Input, Skeleton } from "@/components/ui";
-import type { Profile } from "@/lib/types";
+import { errMsg } from "@/lib/run-status";
+import { parsePhones } from "@/lib/forms";
+import type { CreateProfileInput, Profile } from "@/lib/types";
 
 export default function ProfilesPage() {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ["profiles"],
-    queryFn: () => api.get<{ items: Profile[] }>("/api/profiles"),
+    queryFn: () => api.get<Profile[]>("/profiles"),
   });
 
-  const [name, setName] = useState("");
+  const [form, setForm] = useState({
+    name: "", headerFullName: "", headerCity: "", phones: "", headerEmail: "", linkedIn: "",
+  });
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const phones = parsePhones(form.phones);
+  const valid =
+    form.name.trim() && form.headerFullName.trim() && form.headerCity.trim() &&
+    phones.length > 0 && /\S+@\S+\.\S+/.test(form.headerEmail);
+
   const create = useMutation({
-    mutationFn: () => api.post<Profile>("/api/profiles", { name }),
+    mutationFn: () => {
+      const body: CreateProfileInput = {
+        name: form.name.trim(),
+        headerFullName: form.headerFullName.trim(),
+        headerCity: form.headerCity.trim(),
+        headerPhones: phones,
+        headerEmail: form.headerEmail.trim(),
+        ...(form.linkedIn.trim() ? { linkedIn: form.linkedIn.trim() } : {}),
+      };
+      return api.post<Profile>("/profiles", body);
+    },
     onSuccess: () => {
-      setName("");
+      setForm({ name: "", headerFullName: "", headerCity: "", phones: "", headerEmail: "", linkedIn: "" });
       void qc.invalidateQueries({ queryKey: ["profiles"] });
     },
   });
 
-  const items = data?.items ?? [];
+  const items = data ?? [];
 
   return (
     <div className="space-y-8">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Profiles</h1>
-        <p className="mt-1 text-sm text-fg-2">Each profile holds one base résumé and a locked header.</p>
+        <p className="mt-1 text-sm text-fg-2">
+          Each profile holds a header that is copied into every résumé unchanged, plus the
+          employment roster and a base résumé.
+        </p>
       </header>
 
-      <Card className="flex gap-2 p-4">
-        <Input
-          placeholder="New profile name (e.g. Senior Backend — 2025)"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <Button loading={create.isPending} onClick={() => name.trim() && create.mutate()}>
-          Create
-        </Button>
+      <Card className="space-y-3 p-5">
+        <h2 className="text-sm font-medium">New profile</h2>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Input placeholder="Profile name (e.g. Product, 2026)" value={form.name} onChange={set("name")} />
+          <Input placeholder="Full name as it appears on the résumé" value={form.headerFullName} onChange={set("headerFullName")} />
+          <Input placeholder="City, Country" value={form.headerCity} onChange={set("headerCity")} />
+          <Input placeholder="Phones (comma separated)" value={form.phones} onChange={set("phones")} />
+          <Input type="email" placeholder="Email" value={form.headerEmail} onChange={set("headerEmail")} />
+          <Input placeholder="LinkedIn (optional)" value={form.linkedIn} onChange={set("linkedIn")} />
+        </div>
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-danger">{create.isError ? errMsg(create.error) : ""}</p>
+          <Button loading={create.isPending} disabled={!valid} onClick={() => create.mutate()}>
+            Create profile
+          </Button>
+        </div>
       </Card>
 
       {isLoading ? (
@@ -53,12 +85,16 @@ export default function ProfilesPage() {
             <Link key={p.id} href={`/profiles/${p.id}`}>
               <Card className="flex items-center justify-between p-5 hover:bg-bg-3">
                 <div>
-                  <div className="font-medium">{p.name}</div>
+                  <div className="font-medium">
+                    {p.name}{p.isDefault ? <span className="ml-2 text-xs text-gold-2">default</span> : null}
+                  </div>
                   <div className="mt-1 text-xs text-fg-2">
-                    {p.baseResumeFileName ?? "No base résumé uploaded"}
+                    {p.headerFullName} · {p.headerCity}
                   </div>
                 </div>
-                <span className="text-xs text-fg-2">{p.headerLocked ? "Header locked" : "Header unlocked"}</span>
+                <span className="text-xs text-fg-2">
+                  {p.activeBaseId ? "Base résumé uploaded" : "No base résumé"}
+                </span>
               </Card>
             </Link>
           ))}
