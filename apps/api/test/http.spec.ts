@@ -8,6 +8,7 @@ import { RateLimitService } from '../src/common/rate-limit/rate-limit.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { AdminGuard } from '../src/auth/admin.guard';
 import { Admin2faService } from '../src/admin/admin-2fa.service';
+import { AdminReadService } from '../src/admin/admin-read.service';
 import { AdminController } from '../src/admin/admin.controller';
 import { AdminOrBootstrapGuard } from '../src/admin/admin-or-bootstrap.guard';
 import { RunsController } from '../src/runs/runs.controller';
@@ -21,6 +22,7 @@ const runs = {
   cancel: vi.fn(), retry: vi.fn(), output: vi.fn(), validation: vi.fn(), artifact: vi.fn(), remove: vi.fn(),
 };
 const twoFa = { enroll: vi.fn(), verify: vi.fn() };
+const adminRead = { users: vi.fn(), runs: vi.fn(), runDetail: vi.fn(), reproduce: vi.fn(), auditLog: vi.fn() };
 const users: Record<string, { isAdmin: boolean; adminUnlimited: boolean; role: string }> = {
   'admin-1': { isAdmin: true, adminUnlimited: true, role: 'ADMIN' },
   'user-1': { isAdmin: false, adminUnlimited: false, role: 'USER' },
@@ -36,6 +38,7 @@ beforeAll(async () => {
     providers: [
       { provide: RunsService, useValue: runs },
       { provide: Admin2faService, useValue: twoFa },
+      { provide: AdminReadService, useValue: adminRead },
       { provide: PrismaService, useValue: { user: { findUnique: async ({ where }: any) => users[where.id] ?? null } } },
       { provide: RateLimitService, useValue: { consume: async () => undefined } },
       AdminGuard,
@@ -198,5 +201,30 @@ describe('POST /v1/admin/2fa/enroll', () => {
     twoFa.verify.mockResolvedValue({ adminId: 'admin-1', enabled: true });
     expect((await request(app.getHttpServer()).post('/v1/admin/2fa/verify').set('Authorization', auth).send({ code: '12' })).status).toBe(400);
     expect((await request(app.getHttpServer()).post('/v1/admin/2fa/verify').set('Authorization', auth).send({ code: '123456' })).status).toBe(200);
+  });
+});
+
+describe('admin panel routes', () => {
+  it('are hidden (404) from non-admins, even with a token claiming admin', async () => {
+    for (const token of [await tokenFor('user-1'), await tokenFor('user-1', 'ADMIN', true)]) {
+      const res = await request(app.getHttpServer()).get('/v1/admin/users').set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(404);
+    }
+    expect((await request(app.getHttpServer()).get('/v1/admin/users')).status).toBe(401);
+    expect(adminRead.users).not.toHaveBeenCalled();
+  });
+
+  it('serve admins, pass paging params through, and 202 on reproduce', async () => {
+    const auth = `Bearer ${await tokenFor('admin-1', 'ADMIN', true)}`;
+    adminRead.users.mockResolvedValue({ items: [], nextCursor: null });
+    adminRead.reproduce.mockResolvedValue({ runId: UUID2, status: 'QUEUED', sourceRunId: UUID });
+
+    expect((await request(app.getHttpServer()).get('/v1/admin/users?limit=5').set('Authorization', auth)).status).toBe(200);
+    expect(adminRead.users).toHaveBeenCalledWith({ limit: 5 });
+    expect((await request(app.getHttpServer()).get('/v1/admin/audit?limit=1000').set('Authorization', auth)).status).toBe(400);
+
+    const res = await request(app.getHttpServer()).post(`/v1/admin/runs/${UUID}/reproduce`).set('Authorization', auth).send({});
+    expect(res.status).toBe(202);
+    expect(adminRead.reproduce).toHaveBeenCalledWith('admin-1', UUID, expect.any(Object));
   });
 });

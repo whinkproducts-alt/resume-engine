@@ -22,6 +22,8 @@ export class JdsService {
     });
     if (!profile) throw new AppError('PROFILE_NOT_FOUND', 404);
 
+    const pastedText = dto.rawText ?? dto.text;
+    const sourceUrl = dto.sourceUrl ?? dto.url;
     const sourceType = file ? 'file' : dto.sourceType;
     if (!sourceType) {
       throw new AppError('SOURCE_TYPE_REQUIRED', 400, 'sourceType is required.');
@@ -29,11 +31,11 @@ export class JdsService {
 
     let text: string;
     if (sourceType === 'paste') {
-      if (!dto.text) throw new AppError('JD_TEXT_REQUIRED', 400);
-      text = dto.text;
+      if (!pastedText) throw new AppError('JD_TEXT_REQUIRED', 400);
+      text = pastedText;
     } else if (sourceType === 'url') {
-      if (!dto.url) throw new AppError('JD_URL_REQUIRED', 400);
-      text = await this.fetchUrlText(dto.url);
+      if (!sourceUrl) throw new AppError('JD_URL_REQUIRED', 400);
+      text = await this.fetchUrlText(sourceUrl);
     } else {
       if (!file) throw new AppError('JD_FILE_REQUIRED', 400);
       text = await this.fileText(file);
@@ -53,7 +55,7 @@ export class JdsService {
         userId: user.id,
         profileId: profile.id,
         sourceType,
-        sourceUrl: dto.url ?? null,
+        sourceUrl: sourceType === 'url' ? (sourceUrl ?? null) : null,
         sourceFileName: file?.originalname ?? null,
         rawText: text,
         extractedChars: text.length,

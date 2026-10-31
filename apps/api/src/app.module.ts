@@ -7,6 +7,8 @@ import { ProfilesModule } from './profiles/profiles.module';
 import { JdsModule } from './jds/jds.module';
 import { RunsModule } from './runs/runs.module';
 import { AdminModule } from './admin/admin.module';
+import { SettingsModule } from './settings/settings.module';
+import { BrandingModule } from './branding/branding.module';
 
 @Module({
   imports: [
@@ -18,6 +20,8 @@ import { AdminModule } from './admin/admin.module';
     JdsModule,
     RunsModule,
     AdminModule,
+    SettingsModule,
+    BrandingModule,
   ],
 })
 export class AppModule {}

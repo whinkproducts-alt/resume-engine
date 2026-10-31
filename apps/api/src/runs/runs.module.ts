@@ -10,6 +10,6 @@ import { StorageService } from './storage.service';
   imports: [AuthModule],
   controllers: [RunsController],
   providers: [RunsService, QuotaService, QueueService, StorageService],
-  exports: [QuotaService],
+  exports: [QuotaService, QueueService],
 })
 export class RunsModule {}

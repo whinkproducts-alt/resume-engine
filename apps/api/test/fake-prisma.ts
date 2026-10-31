@@ -61,8 +61,11 @@ function table(name: string, fake: FakePrisma) {
     },
     findFirst: async (a: { where?: Row; orderBy?: unknown } = {}) =>
       sortRows(rows.filter((r) => matches(r, a.where)), a.orderBy)[0] ?? null,
-    findMany: async (a: { where?: Row; orderBy?: unknown } = {}) =>
-      sortRows(rows.filter((r) => matches(r, a.where)), a.orderBy),
+    findMany: async (a: { where?: Row; orderBy?: unknown; cursor?: Row; skip?: number; take?: number } = {}) => {
+      let out = sortRows(rows.filter((r) => matches(r, a.where)), a.orderBy);
+      if (a.cursor) out = out.slice(out.findIndex((r) => r.id === a.cursor!.id) + (a.skip ?? 0));
+      return a.take ? out.slice(0, a.take) : out;
+    },
     create: async (a: { data: Row }) => {
       const row = { id: uid(), createdAt: new Date(), ...a.data };
       rows.push(row);
@@ -133,10 +136,14 @@ export class FakePrisma {
   runCredit = table('runCredit', this);
   adminAction = table('adminAction', this);
   session = table('session', this);
+  brandingConfig = table('brandingConfig', this);
   roleEntry = table('roleEntry', this);
   education = table('education', this);
   certification = table('certification', this);
-  ruleSet = { upsert: async () => ({ id: 'ruleset-1', version: 'v3.1' }) };
+  ruleSet = {
+    upsert: async () => ({ id: 'ruleset-1', version: 'v3.1' }),
+    rows: [{ id: 'ruleset-1', version: 'v3.1', promptVersion: 'v1' }] as Row[],
+  };
   promptVersion = { upsert: async () => ({}) };
 
   constructor() {
@@ -145,17 +152,21 @@ export class FakePrisma {
       ...r,
       ...(include?.jd ? { jd: this.jobDescription.rows.find((j) => j.id === r.jdId) } : {}),
       ...(include?.profile ? { profile: this.profile.rows.find((p) => p.id === r.profileId) } : {}),
+      ...(include?.user ? { user: this.user.rows.find((u) => u.id === r.userId) } : {}),
     }));
     const { findFirst, findMany } = this.run;
+    const findUnique = this.run.findUnique;
+    (this.run as any).findUnique = async (a: any) => {
+      const row = await findUnique(a);
+      if (!row) return null;
+      return a.include?.ruleSet ? { ...row, ruleSet: this.ruleSet.rows.find((x) => x.id === row.ruleSetId) } : row;
+    };
     (this.run as any).findFirst = async (a: any = {}) => {
       const row = await findFirst(a);
       return row ? attach([row], a.include)[0]! : null;
     };
     (this.run as any).findMany = async (a: any = {}) => {
-      let rows = await findMany(a);
-      if (a.cursor) rows = rows.slice(rows.findIndex((r) => r.id === a.cursor.id) + (a.skip ?? 0));
-      if (a.take) rows = rows.slice(0, a.take);
-      return attach(rows, a.include);
+      return attach(await findMany(a), a.include);
     };
   }
 
