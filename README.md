@@ -46,7 +46,8 @@ pnpm dev                 # web :3000, api :4000
 
 ## Docs
 - `docs/source-parts/` — the original Stage 1–4 master code documents (Parts 1–4), kept unmodified. The source files under `apps/` and `packages/` were extracted verbatim from them.
-- Master spec, ruleset, design tokens and API docs (`docs/01-SPEC-v3.md`, `docs/02-RESUME_ENGINE_SPEC.md`, `docs/DESIGN_TOKENS.md`, `docs/API.md`) are planned but not yet added.
+- [Architecture](docs/ARCHITECTURE.md), [API](docs/API.md), [Rules](docs/RULES.md), [Design tokens](docs/DESIGN_TOKENS.md) and [Frontend](docs/03-FRONTEND-STAGE4.md) are drafted from the code.
+- Master spec and ruleset (`docs/01-SPEC-v3.md`, `docs/02-RESUME_ENGINE_SPEC.md`), plus deployment and onboarding guides, have not been added yet.
 
 ## License
 Proprietary — © Whink Apps. See `LICENSE`.
