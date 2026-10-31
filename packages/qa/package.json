@@ -1,0 +1,12 @@
+{
+  "name": "@resume-engine/qa",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "pdf-lib": "^1.17.1",
+    "@resume-engine/rules": "workspace:*"
+  },
+  "devDependencies": { "typescript": "^5.5.4" }
+}

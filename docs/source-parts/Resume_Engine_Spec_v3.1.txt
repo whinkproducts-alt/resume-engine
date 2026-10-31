@@ -1,0 +1,565 @@
+====================================================================
+RESUME ENGINE — MASTER SPECIFICATION & ARCHITECTURE (v3.1)
+====================================================================
+Product: Resume Engine (Whink Apps, a Whink Group company)
+Owner / Admin: Victor Igboekwe, Whinkproducts@gmail.com
+Model: Public white-label SaaS with a dedicated admin account
+
+====================================================================
+SECTION 1: VICTOR'S SIGN-OFF & RESOLVED CLARIFICATIONS
+====================================================================
+I, Victor Igboekwe (Whink Apps), have reviewed the kick-off deliverable and approve Phase 1. You are cleared to begin coding immediately. 
+
+The following clarification points are resolved and authoritative:
+1. R18 Filename regex: ^[a-zA-Z0-9\s\-_]+_[a-zA-Z0-9\s\-_]+_[a-zA-Z0-9\s\-_]+\.docx$
+2. R2 Close variant: Use a 70% token overlap (ignoring stop words like "Senior", "Lead").
+3. R9 LLM Judged: Records a `warn` ValidationFlag but does NOT block the run.
+4. R10 Duplicate verb: Per-resume check. Warning severity only (non-blocking).
+5. 2FA Route: Use POST /admin/2fa/enroll (not GET).
+6. Bootstrap Token: Passed via the X-Bootstrap-Token header (not body).
+*All defaults in the Open Questions section are explicitly ACCEPTED.*
+
+====================================================================
+SECTION 2: ARCHITECTURAL DECISIONS & LICENSING
+====================================================================
+1. Schema Decision: The Part 1 Prisma Schema wins. The BullMQ worker is an application process that writes to the database, it does not dictate the schema. If the worker needs a new field, use a standard Prisma migration.
+2. Frontend vs. Backend Contract: The Backend wins. The API defines the JSON payloads exactly as specified. The frontend (TanStack Query) must adapt to the backend's shapes.
+3. License Choice: Proprietary / All Rights Reserved. This is a closed-source commercial SaaS product owned by Whink Apps.
+
+====================================================================
+SECTION 3: MASTER ARCHITECTURE (01-SPEC-v3.md)
+====================================================================
+## 1. Product overview
+Resume Engine is a public SaaS that takes a job description (JD) as input and produces a tailored, ATS-optimized Word resume (.docx) as output. 
+Admin: One admin account (Whinkproducts@gmail.com) with unlimited runs, admin panel access, and no billing. Provisioned via environment variables only.
+
+## 2. Roles, permissions, quotas
+enum UserRole { USER PRO AGENCY ADMIN }
+- USER: 1 profile, per-credit runs
+- PRO: 3 profiles, 10 runs/month
+- AGENCY: Unlimited profiles, unlimited runs
+- ADMIN: Everything, unlimited, no billing, admin panel
+
+async function assertCanRun(user: User) {
+  if (user.isAdmin && user.adminUnlimited) return; // bypass
+  if (user.role === 'AGENCY') return;
+  if (user.role === 'PRO') {
+    const used = await usageCount(user.id, currentMonth());
+    if (used >= 10) throw new AppError('RUN_LIMIT_REACHED', 402);
+    return;
+  }
+  const credits = await remainingCredits(user.id);
+  if (credits < 1) throw new AppError('NO_CREDITS', 402);
+}
+
+## 3. Authentication & admin provisioning
+### 3.1 Standard auth
+- Argon2id hashing (m=64MB, t=3, p=4).
+- Password: min 12 chars, upper + lower + digit + symbol.
+- Access: JWT (HS256 or RS256), 15-min TTL, claims { sub, role, isAdmin, iat, exp, jti }.
+- Refresh: 256-bit random, hashed SHA-256 in Session, 30-day TTL.
+- Brute force: standard 10 attempts / 15 min / IP; admin 5 attempts / 15 min / IP.
+
+### 3.3 Admin provisioning — no hardcoded passwords
+Environment variables, set only in the hosting provider's secret store:
+ADMIN_EMAIL=Whinkproducts@gmail.com
+ADMIN_SEED_PASSWORD=<set a strong unique password here>
+ADMIN_BOOTSTRAP_TOKEN=<random 32-byte base64>
+
+Startup hook (apps/api/src/auth/bootstrap-admin.ts), runs at boot before traffic:
+export async function ensureAdmin() {
+  const email = process.env.ADMIN_EMAIL;
+  if (!email) return;
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing) {
+    if (!existing.isAdmin) {
+      await prisma.user.update({
+        where: { id: existing.id },
+        data: { isAdmin: true, adminUnlimited: true, role: 'ADMIN' },
+      });
+    }
+    return;
+  }
+  const password = process.env.ADMIN_SEED_PASSWORD;
+  if (!password) throw new Error('ADMIN_SEED_PASSWORD required on first boot');
+  await prisma.user.create({
+    data: {
+      email,
+      passwordHash: await argon2.hash(password),
+      firstName: 'Victor',
+      lastName: 'Igboekwe',
+      role: 'ADMIN',
+      isAdmin: true,
+      adminUnlimited: true,
+      emailVerified: true,
+      mustChangePassword: process.env.NODE_ENV === 'production',
+    },
+  });
+}
+Bootstrap endpoint (idempotent, for fresh environments):
+POST /auth/bootstrap-admin
+Rules: Only succeeds if users.count == 0 OR X-Bootstrap-Token matches ADMIN_BOOTSTRAP_TOKEN.
+
+## 4. Data models
+enum UserRole { USER PRO AGENCY ADMIN }
+model User {
+  id String @id @default(uuid())
+  email String @unique
+  passwordHash String
+  role UserRole @default(USER)
+  isAdmin Boolean @default(false)
+  adminUnlimited Boolean @default(false)
+  emailVerified Boolean @default(false)
+  mustChangePassword Boolean @default(false)
+  firstName String?
+  lastName String?
+  themePref String @default("SYSTEM")
+  stripeCustomerId String? @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  profiles Profile[]
+  subscription Subscription?
+  payments Payment[]
+  runCredits RunCredit[]
+  usage UsageCounter[]
+  sessions Session[]
+  resetTokens PasswordResetToken[]
+  oauthAccounts OAuthAccount[]
+  runs Run[]
+  branding BrandingConfig?
+  adminActionsMade AdminAction[] @relation("adminMade")
+  adminActionsOnSelf AdminAction[] @relation("adminOn")
+}
+model Session {
+  id String @id @default(uuid())
+  userId String
+  refreshHash String
+  userAgent String?
+  ip String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  user User @relation(fields: [userId], references: [id])
+  @@index([userId])
+}
+model PasswordResetToken {
+  id String @id @default(uuid())
+  userId String
+  tokenHash String @unique
+  expiresAt DateTime
+  usedAt DateTime?
+  user User @relation(fields: [userId], references: [id])
+}
+model OAuthAccount {
+  id String @id @default(uuid())
+  userId String
+  provider String
+  providerId String
+  user User @relation(fields: [userId], references: [id])
+  @@unique([provider, providerId])
+}
+model AdminAction {
+  id String @id @default(uuid())
+  adminId String
+  targetUserId String?
+  action String
+  meta Json?
+  ip String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  admin User @relation("adminMade", fields: [adminId], references: [id])
+  targetUser User? @relation("adminOn", fields: [targetUserId], references: [id])
+  @@index([adminId, createdAt])
+  @@index([targetUserId, createdAt])
+}
+model Profile {
+  id String @id @default(uuid())
+  userId String
+  name String
+  headerFullName String
+  headerCity String
+  headerPhones String[]
+  headerEmail String
+  linkedIn String?
+  isDefault Boolean @default(false)
+  activeBaseId String?
+  user User @relation(fields: [userId], references: [id])
+  bases BaseResume[]
+  roles RoleEntry[]
+  education Education[]
+  certs Certification[]
+  facts FactBankEntry[]
+  settings ProfileSettings?
+  runs Run[]
+  @@index([userId])
+}
+model BaseResume {
+  id String @id @default(uuid())
+  profileId String
+  version Int
+  fileName String
+  parsedJson Json
+  isActive Boolean @default(false)
+  uploadedAt DateTime @default(now())
+  profile Profile @relation(fields: [profileId], references: [id])
+  @@unique([profileId, version])
+  @@index([profileId, isActive])
+}
+model RoleEntry {
+  id String @id @default(uuid())
+  profileId String
+  companyName String
+  title String
+  baseTitle String
+  startDate DateTime
+  endDate DateTime?
+  location String?
+  orderIndex Int
+  baseBullets Json
+  baseFlagship String?
+  profile Profile @relation(fields: [profileId], references: [id])
+  @@index([profileId, orderIndex])
+}
+model Education {
+  id String @id @default(uuid())
+  profileId String
+  institution String
+  degree String
+  field String?
+  startYear Int
+  endYear Int?
+  profile Profile @relation(fields: [profileId], references: [id])
+}
+model Certification {
+  id String @id @default(uuid())
+  profileId String
+  name String
+  issuer String?
+  year Int?
+  profile Profile @relation(fields: [profileId], references: [id])
+}
+model FactBankEntry {
+  id String @id @default(uuid())
+  profileId String
+  roleId String?
+  kind String
+  claimText String
+  metricValue String?
+  metricUnit String?
+  context String
+  employer String?
+  verified Boolean @default(false)
+  sourceNote String?
+  profile Profile @relation(fields: [profileId], references: [id])
+  @@index([profileId, verified])
+}
+model JobDescription {
+  id String @id @default(uuid())
+  userId String
+  profileId String
+  sourceType String
+  sourceUrl String?
+  sourceFileName String?
+  rawText String
+  extractedChars Int
+  status String
+  company String?
+  roleTitle String?
+  location String?
+  salaryText String?
+  seniority String?
+  industryTags String[]
+  responsibilities Json?
+  requirements Json?
+  keywords String[]
+  companyInferred Boolean @default(false)
+  companyConfidence Float?
+  createdAt DateTime @default(now())
+  runs Run[]
+  @@index([userId, createdAt])
+}
+enum RunStatus {
+  QUEUED
+  READING_JD
+  ANALYZING
+  AWAITING_COMPANY_CONFIRM
+  REWRITING
+  VALIDATING
+  RENDERING
+  EXPORTING_PDF
+  COMPLETE
+  FAILED
+  CANCELLED
+}
+model Run {
+  id String @id @default(uuid())
+  userId String
+  profileId String
+  baseResumeId String
+  ruleSetId String
+  jdId String
+  planTier String
+  status RunStatus @default(QUEUED)
+  stage String?
+  progress Float @default(0)
+  companyConfirmed Boolean @default(false)
+  contactLocationOverride String?
+  settingsSnap Json
+  atsScore Int?
+  metrics Json?
+  keywordCount Int?
+  pageCount Int?
+  estimatedCostUsd Float?
+  actualTokens Int?
+  validation Json?
+  outputJson Json?
+  docxKey String?
+  pdfKey String?
+  errorCode String?
+  startedAt DateTime?
+  finishedAt DateTime?
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id])
+  profile Profile @relation(fields: [profileId], references: [id])
+  jd JobDescription @relation(fields: [jdId], references: [id])
+  ruleSet RuleSet @relation(fields: [ruleSetId], references: [id])
+  steps RunLog[]
+  flags ValidationFlag[]
+  keywordSet KeywordSet?
+  targets AlignedCompany[]
+  @@index([userId, createdAt])
+}
+model RuleSet {
+  id String @id @default(uuid())
+  version String @unique
+  rulesJson Json
+  styleConfig Json
+  promptVersion String
+  createdAt DateTime @default(now())
+  runs Run[]
+}
+model PromptVersion {
+  id String @id @default(uuid())
+  section String
+  version String
+  template String
+  modelId String
+  createdAt DateTime @default(now())
+  @@unique([section, version])
+}
+model KeywordSet {
+  id String @id @default(uuid())
+  runId String @unique
+  jdTerms String[]
+  relatedTerms String[]
+  totalDistinct Int
+  run Run @relation(fields: [runId], references: [id])
+}
+model AlignedCompany {
+  id String @id @default(uuid())
+  runId String
+  rank Int
+  name String
+  department String?
+  exampleRole String?
+  isTarget Boolean @default(false)
+  run Run @relation(fields: [runId], references: [id])
+  @@unique([runId, rank])
+}
+model RunLog {
+  id String @id @default(uuid())
+  runId String
+  step String
+  status String
+  attempt Int @default(1)
+  durationMs Int?
+  tokensIn Int?
+  tokensOut Int?
+  modelId String?
+  errorCode String?
+  errorMsg String?
+  createdAt DateTime @default(now())
+  run Run @relation(fields: [runId], references: [id])
+  @@index([runId])
+}
+model ValidationFlag {
+  id String @id @default(uuid())
+  runId String
+  code String
+  severity String
+  field String?
+  message String
+  run Run @relation(fields: [runId], references: [id])
+  @@index([runId])
+}
+model Document {
+  id String @id @default(uuid())
+  runId String @unique
+  docxKey String
+  pdfKey String?
+  sizeBytes Int?
+  createdAt DateTime @default(now())
+}
+model UserSettings {
+  id String @id @default(uuid())
+  userId String @unique
+  strictFactsMode Boolean @default(true)
+  flagAndInclude Boolean @default(false)
+  lockCompanyNames Boolean @default(true)
+  lockEmploymentDates Boolean @default(true)
+  blockOnUnusableJD Boolean @default(true)
+  inferCompanyName Boolean @default(true)
+  banHyphensInProse Boolean @default(true)
+  consultingFraming Boolean @default(false)
+  whinkGroupFraming Boolean @default(false)
+  heritageLineDefault Boolean @default(false)
+  user User @relation(fields: [userId], references: [id])
+}
+model ProfileSettings {
+  id String @id @default(uuid())
+  profileId String @unique
+  overrides Json
+  profile Profile @relation(fields: [profileId], references: [id])
+}
+model Plan {
+  id String @id @default(uuid())
+  code String @unique
+  name String
+  priceCentsMonthly Int
+  priceCentsAnnual Int?
+  runsPerMonth Int?
+  maxProfiles Int?
+  features Json
+  stripePriceMonthlyId String?
+  stripePriceAnnualId String?
+  stripePriceOneRunId String?
+}
+model Subscription {
+  id String @id @default(uuid())
+  userId String @unique
+  planCode String
+  status String
+  stripeSubscriptionId String? @unique
+  stripePriceId String?
+  currentPeriodEnd DateTime?
+  cancelAtPeriodEnd Boolean @default(false)
+  user User @relation(fields: [userId], references: [id])
+}
+model Payment {
+  id String @id @default(uuid())
+  userId String
+  stripePaymentIntentId String? @unique
+  kind String
+  amountCents Int
+  currency String @default("usd")
+  status String
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id])
+  @@index([userId, createdAt])
+}
+model RunCredit {
+  id String @id @default(uuid())
+  userId String
+  source String
+  remaining Int
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id])
+  @@index([userId])
+}
+model UsageCounter {
+  id String @id @default(uuid())
+  userId String
+  period String
+  runsUsed Int @default(0)
+  user User @relation(fields: [userId], references: [id])
+  @@unique([userId, period])
+}
+model BrandingConfig {
+  id String @id @default(uuid())
+  userId String @unique
+  displayName String
+  logoUrl String?
+  contactEmail String?
+  contactPhone String?
+  footerText String?
+  primaryColor String @default("#1F3864")
+  updatedAt DateTime @updatedAt
+  user User @relation(fields: [userId], references: [id])
+}
+
+## 5. Pipeline — stages 0 through 8
+STAGE 0 — QUOTA GATE: assertCanRun(user).
+STAGE 1 — INGEST: sourceType: paste | file | url. If <200 chars → FAILED (JD_UNUSABLE).
+STAGE 2 — ANALYZE: LLM outputs company, roleTitle, location, seniority, industryTags[], topKeywords[25], responsibilities[], requirements[], companyInferred, companyConfidence.
+STAGE 3 — CONFIRM: If companyInferred OR confidence < 0.75 → AWAITING_COMPANY_CONFIRM.
+STAGE 4 — REWRITE: Staged LLM calls. headline (R2,R3), summary (R4,R20), competencies (R5), roles (R6,R8-R12,R19), keywords (R14,R15), targets (R16).
+STAGE 5 — ASSEMBLE: Merge sections. Copy header (R1), education/certs/dates (R7,R13). Apply contactLocationOverride.
+STAGE 6 — VALIDATE: Run R1-R20. Fact bank check. Claims check. Style lint.
+STAGE 7 — RENDER: docx npm. If AGENCY: inject BrandingConfig.
+STAGE 8 — EXPORT & QA: Upload DOCX to S3. LibreOffice PDF. Page count. Upload PDF.
+
+## 7. API surface
+Base: /v1.
+- POST /auth/bootstrap-admin (X-Bootstrap-Token)
+- POST /auth/login
+- GET /auth/me
+- GET, POST /profiles
+- PATCH /profiles/:id
+- POST /profiles/:id/bases
+- POST /jds
+- GET /jds/:id
+- POST /runs
+- GET /runs/:id
+- POST /runs/:id/confirm-company
+
+## 13. Security & compliance
+- Resumes are PII. Encrypt at rest (Postgres + S3 SSE). Never log full resume text.
+- Admin credential: env-only. Never hardcoded, never committed, never in logs.
+
+====================================================================
+SECTION 4: AUTHORITATIVE RULESET (02-RESUME_ENGINE_SPEC.md)
+====================================================================
+# Handoff Spec: JD to Resume Automation Engine
+Generated: 2026-10-30
+Owner: Victor Igboekwe (Whinkproducts@gmail.com)
+
+### 4. Rewrite rules as machine checkable rules
+| ID | Rule | Check |
+|----|------|-------|
+| R1 | Header is locked | String match against profile header |
+| R2 | Headline is rewritten to the JD | Contains the JD role title or a close variant |
+| R3 | Two headline lines: role line, then industry line | Count equals 2 |
+| R4 | Professional summary rewritten to the JD | 4 short paragraphs. Uses JD language |
+| R5 | Core Competencies has exactly six subsections in this order: Soft Skills, Stakeholder Management, Technical Skills, Delivery Methodologies, Security and Compliance, Business Tools | Labels match |
+| R6 | Role titles change to JD adjacent titles | Title differs from base. Overlaps JD terms |
+| R7 | Company names, dates, order never change | Match roster |
+| R8 | Every role opens with one bold flagship line | Exactly one per role |
+| R9 | Bullet structure: "accomplished X by measure Y resulting in Z" | LLM judged, flagged not blocked |
+| R10 | Bullets are varied. No repeated openings across companies | Duplicate opening verb check per resume |
+| R11 | Minimum 8 experience points per role (flagship plus bullets) | Count >= 8. Pad with JD aligned content if short |
+| R12 | Bullet count per role stays stable against the base | Warn on drift |
+| R13 | Education, certifications, dates unchanged | Match profile |
+| R14 | Keyword block: JD keywords plus 150 related keywords | Count >= 150 distinct terms. Dedupe |
+| R15 | Replace the old keyword block every time. Never carry over | Block differs from base |
+| R16 | Add "Target companies and similar roles": 7 companies, each with department and example role | Count equals 7 |
+| R17 | WHINK Group framing: past employer projects may be presented as completed under WHINK Group for past performance | Optional toggle per resume |
+| R18 | File name format | Regex match |
+| R19 | Full company blocks are rewritten, including any bullets that sit before the bold line | No leftover base text |
+| R20 | Writing style: short sentences, plain direct prose, no hyphens or em dashes in written communications | Lint |
+
+### 6. DOCX layout spec (taken from the working build script)
+- **Page:** US Letter, 12240 x 15840 DXA
+- **Margins:** top 720, right 1008, bottom 720, left 1008 DXA
+- **Font:** Calibri throughout
+- **Name:** 20pt (size 40), bold, color `1F3864`, centered
+- **Contact line:** 10pt, centered, parts separated by " | "
+- **Divider:** paragraph bottom border, single, size 8, color `2E74B5`
+- **Headline line 1:** 11pt, bold, centered, caps
+- **Headline line 2:** 10pt, italic, centered
+- **Section heading:** 11pt, bold, color `1F3864`, bottom border size 6 color `2E74B5`, space before 180 after 80
+- **Body text:** 10pt
+- **Company line:** Company bold 10.5pt, then " | dates" regular 10pt
+- **Role title:** 10pt italic
+- **Flagship bullet:** bold, bullet glyph "▸", indent left 360 hanging 360
+- **Standard bullet:** "•", indent left 360 hanging 360
+- **Keyword block:** 9pt, one paragraph
