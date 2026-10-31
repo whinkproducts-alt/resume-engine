@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap");
+
+:root {
+  /* Design tokens — DO NOT OVERRIDE */
+  --bg:        #08090b;
+  --bg-2:      #10131a;
+  --bg-3:      #181c26;
+  --surface:   #1c2130;
+  --border:    rgba(255, 255, 255, 0.07);
+  --fg:        #edf0f5;
+  --fg-2:      #8e97aa;
+  --gold:      #d4a017;
+  --gold-2:    #f0c040;
+  --success:   #22c55e;
+  --danger:    #f05252;
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Outfit", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  border-color: var(--border);
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg-2); }
+::-webkit-scrollbar-thumb {
+  background: var(--bg-3);
+  border-radius: 8px;
+  border: 2px solid var(--bg-2);
+}
+::selection { background: rgba(212,160,23,0.35); color: #fff; }
+
+/* Utility baseline */
+.btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors;
+}
+.btn-primary { @apply bg-gold text-black hover:bg-gold-2; }
+.btn-ghost  { @apply text-fg-2 hover:bg-bg-3 hover:text-fg; }
+.btn-danger { @apply bg-danger text-white hover:bg-danger/90; }
+.btn-outline{ @apply border border-border text-fg hover:bg-bg-3; }
+
+.input {
+  @apply w-full rounded-lg border border-border bg-bg-2 px-3 py-2 text-sm text-fg
+         placeholder:text-fg-2/60 focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold/40;
+}
+
+.card { @apply rounded-xl border border-border bg-surface shadow-card; }
+
+.badge {
+  @apply inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide;
+}
+.badge-warn  { @apply border-gold/40 text-gold-2 bg-gold/10; }
+.badge-ok    { @apply border-success/40 text-success bg-success/10; }
+.badge-fail  { @apply border-danger/40 text-danger bg-danger/10; }
+.badge-idle  { @apply border-border text-fg-2 bg-bg-3; }

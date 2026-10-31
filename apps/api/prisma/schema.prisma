@@ -1,0 +1,432 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  PRO
+  AGENCY
+  ADMIN
+}
+
+enum RunStatus {
+  QUEUED
+  READING_JD
+  ANALYZING
+  AWAITING_COMPANY_CONFIRM
+  REWRITING
+  VALIDATING
+  RENDERING
+  EXPORTING_PDF
+  COMPLETE
+  FAILED
+  CANCELLED
+}
+
+model User {
+  id                String   @id @default(uuid())
+  email             String   @unique
+  passwordHash      String
+  role              UserRole @default(USER)
+  isAdmin           Boolean  @default(false)
+  adminUnlimited    Boolean  @default(false)
+  emailVerified     Boolean  @default(false)
+  mustChangePassword Boolean @default(false)
+  firstName         String?
+  lastName          String?
+  themePref         String   @default("SYSTEM")
+  stripeCustomerId  String?  @unique
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  profiles            Profile[]
+  subscription        Subscription?
+  payments            Payment[]
+  runCredits          RunCredit[]
+  usage               UsageCounter[]
+  sessions            Session[]
+  resetTokens         PasswordResetToken[]
+  oauthAccounts       OAuthAccount[]
+  runs                Run[]
+  branding            BrandingConfig?
+  adminActionsMade    AdminAction[] @relation("adminMade")
+  adminActionsOnSelf  AdminAction[] @relation("adminOn")
+
+  // Required back-relation for UserSettings.user
+  userSettings        UserSettings?
+}
+
+model Session {
+  id          String    @id @default(uuid())
+  userId      String
+  refreshHash String
+  userAgent   String?
+  ip          String?
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  user        User      @relation(fields: [userId], references: [id])
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  user      User      @relation(fields: [userId], references: [id])
+}
+
+model OAuthAccount {
+  id         String @id @default(uuid())
+  userId     String
+  provider   String
+  providerId String
+  user       User   @relation(fields: [userId], references: [id])
+  @@unique([provider, providerId])
+}
+
+model AdminAction {
+  id           String   @id @default(uuid())
+  adminId      String
+  targetUserId String?
+  action       String
+  meta         Json?
+  ip           String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+  admin        User     @relation("adminMade", fields: [adminId], references: [id])
+  targetUser   User?    @relation("adminOn", fields: [targetUserId], references: [id])
+  @@index([adminId, createdAt])
+  @@index([targetUserId, createdAt])
+}
+
+model Profile {
+  id             String   @id @default(uuid())
+  userId         String
+  name           String
+  headerFullName String
+  headerCity     String
+  headerPhones   String[]
+  headerEmail    String
+  linkedIn       String?
+  isDefault      Boolean  @default(false)
+  activeBaseId   String?
+  user           User     @relation(fields: [userId], references: [id])
+  bases          BaseResume[]
+  roles          RoleEntry[]
+  education      Education[]
+  certs          Certification[]
+  facts          FactBankEntry[]
+  settings       ProfileSettings?
+  runs           Run[]
+  @@index([userId])
+}
+
+model BaseResume {
+  id         String   @id @default(uuid())
+  profileId  String
+  version    Int
+  fileName   String
+  parsedJson Json
+  isActive   Boolean  @default(false)
+  uploadedAt DateTime @default(now())
+  profile    Profile  @relation(fields: [profileId], references: [id])
+  @@unique([profileId, version])
+  @@index([profileId, isActive])
+}
+
+model RoleEntry {
+  id          String    @id @default(uuid())
+  profileId   String
+  companyName String
+  title       String
+  baseTitle   String
+  startDate   DateTime
+  endDate     DateTime?
+  location    String?
+  orderIndex  Int
+  baseBullets Json
+  baseFlagship String?
+  profile     Profile   @relation(fields: [profileId], references: [id])
+  @@index([profileId, orderIndex])
+}
+
+model Education {
+  id          String  @id @default(uuid())
+  profileId   String
+  institution String
+  degree      String
+  field       String?
+  startYear   Int
+  endYear     Int?
+  profile     Profile @relation(fields: [profileId], references: [id])
+}
+
+model Certification {
+  id        String  @id @default(uuid())
+  profileId String
+  name      String
+  issuer    String?
+  year      Int?
+  profile   Profile @relation(fields: [profileId], references: [id])
+}
+
+model FactBankEntry {
+  id          String  @id @default(uuid())
+  profileId   String
+  roleId      String?
+  kind        String
+  claimText   String
+  metricValue String?
+  metricUnit  String?
+  context     String
+  employer    String?
+  verified    Boolean @default(false)
+  sourceNote  String?
+  profile     Profile @relation(fields: [profileId], references: [id])
+  @@index([profileId, verified])
+}
+
+model JobDescription {
+  id                String   @id @default(uuid())
+  userId            String
+  profileId         String
+  sourceType        String
+  sourceUrl         String?
+  sourceFileName    String?
+  rawText           String
+  extractedChars    Int
+  status            String
+  company           String?
+  roleTitle         String?
+  location          String?
+  salaryText        String?
+  seniority         String?
+  industryTags      String[]
+  responsibilities  Json?
+  requirements      Json?
+  keywords          String[]
+  companyInferred   Boolean  @default(false)
+  companyConfidence Float?
+  createdAt         DateTime @default(now())
+  runs              Run[]
+  @@index([userId, createdAt])
+}
+
+model Run {
+  id                     String    @id @default(uuid())
+  userId                 String
+  profileId              String
+  baseResumeId           String
+  ruleSetId              String
+  jdId                   String
+  planTier               String
+  status                 RunStatus @default(QUEUED)
+  stage                  String?
+  progress               Float     @default(0)
+  companyConfirmed       Boolean   @default(false)
+  contactLocationOverride String?
+  settingsSnap           Json
+  atsScore               Int?
+  metrics                Json?
+  keywordCount           Int?
+  pageCount              Int?
+  estimatedCostUsd       Float?
+  actualTokens           Int?
+  validation             Json?
+  outputJson             Json?
+  docxKey                String?
+  pdfKey                 String?
+  errorCode              String?
+  startedAt              DateTime?
+  finishedAt             DateTime?
+  createdAt              DateTime  @default(now())
+  user                   User      @relation(fields: [userId], references: [id])
+  profile                Profile   @relation(fields: [profileId], references: [id])
+  jd                     JobDescription @relation(fields: [jdId], references: [id])
+  ruleSet                RuleSet   @relation(fields: [ruleSetId], references: [id])
+  steps                  RunLog[]
+  flags                  ValidationFlag[]
+  keywordSet             KeywordSet?
+  targets                AlignedCompany[]
+  @@index([userId, createdAt])
+}
+
+model RuleSet {
+  id            String   @id @default(uuid())
+  version       String   @unique
+  rulesJson     Json
+  styleConfig   Json
+  promptVersion String
+  createdAt     DateTime @default(now())
+  runs          Run[]
+}
+
+model PromptVersion {
+  id        String   @id @default(uuid())
+  section   String
+  version   String
+  template  String
+  modelId   String
+  createdAt DateTime @default(now())
+  @@unique([section, version])
+}
+
+model KeywordSet {
+  id            String @id @default(uuid())
+  runId         String @unique
+  jdTerms       String[]
+  relatedTerms  String[]
+  totalDistinct Int
+  run           Run    @relation(fields: [runId], references: [id])
+}
+
+model AlignedCompany {
+  id          String  @id @default(uuid())
+  runId       String
+  rank        Int
+  name        String
+  department  String?
+  exampleRole String?
+  isTarget    Boolean @default(false)
+  run         Run     @relation(fields: [runId], references: [id])
+  @@unique([runId, rank])
+}
+
+model RunLog {
+  id         String   @id @default(uuid())
+  runId      String
+  step       String
+  status     String
+  attempt    Int      @default(1)
+  durationMs Int?
+  tokensIn   Int?
+  tokensOut  Int?
+  modelId    String?
+  errorCode  String?
+  errorMsg   String?
+  createdAt  DateTime @default(now())
+  run        Run      @relation(fields: [runId], references: [id])
+  @@index([runId])
+}
+
+model ValidationFlag {
+  id       String  @id @default(uuid())
+  runId    String
+  code     String
+  severity String
+  field    String?
+  message  String
+  run      Run     @relation(fields: [runId], references: [id])
+  @@index([runId])
+}
+
+model Document {
+  id        String   @id @default(uuid())
+  runId     String   @unique
+  docxKey   String
+  pdfKey    String?
+  sizeBytes Int?
+  createdAt DateTime @default(now())
+}
+
+model UserSettings {
+  id                   String  @id @default(uuid())
+  userId               String  @unique
+  strictFactsMode      Boolean @default(true)
+  flagAndInclude       Boolean @default(false)
+  lockCompanyNames     Boolean @default(true)
+  lockEmploymentDates  Boolean @default(true)
+  blockOnUnusableJD    Boolean @default(true)
+  inferCompanyName     Boolean @default(true)
+  banHyphensInProse    Boolean @default(true)
+  consultingFraming    Boolean @default(false)
+  whinkGroupFraming    Boolean @default(false)
+  heritageLineDefault  Boolean @default(false)
+  user                 User    @relation(fields: [userId], references: [id])
+}
+
+model ProfileSettings {
+  id        String  @id @default(uuid())
+  profileId String  @unique
+  overrides Json
+  profile   Profile @relation(fields: [profileId], references: [id])
+}
+
+model Plan {
+  id                    String  @id @default(uuid())
+  code                  String  @unique
+  name                  String
+  priceCentsMonthly     Int
+  priceCentsAnnual      Int?
+  runsPerMonth          Int?
+  maxProfiles           Int?
+  features              Json
+  stripePriceMonthlyId  String?
+  stripePriceAnnualId   String?
+  stripePriceOneRunId   String?
+}
+
+model Subscription {
+  id                   String    @id @default(uuid())
+  userId               String    @unique
+  planCode             String
+  status               String
+  stripeSubscriptionId String?   @unique
+  stripePriceId        String?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean   @default(false)
+  user                 User      @relation(fields: [userId], references: [id])
+}
+
+model Payment {
+  id                    String   @id @default(uuid())
+  userId                String
+  stripePaymentIntentId String?  @unique
+  kind                  String
+  amountCents           Int
+  currency              String   @default("usd")
+  status                String
+  createdAt             DateTime @default(now())
+  user                  User     @relation(fields: [userId], references: [id])
+  @@index([userId, createdAt])
+}
+
+model RunCredit {
+  id        String    @id @default(uuid())
+  userId    String
+  source    String
+  remaining Int
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id])
+  @@index([userId])
+}
+
+model UsageCounter {
+  id       String @id @default(uuid())
+  userId   String
+  period   String
+  runsUsed Int    @default(0)
+  user     User   @relation(fields: [userId], references: [id])
+  @@unique([userId, period])
+}
+
+model BrandingConfig {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  displayName  String
+  logoUrl      String?
+  contactEmail String?
+  contactPhone String?
+  footerText   String?
+  primaryColor String   @default("#1F3864")
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id])
+}
