@@ -1,66 +1,84 @@
 # API
 
-Derived from the code in `apps/api` (Parts 1–2) and from the calls the frontend makes in `apps/web`. It describes what the code does today, including where the two sides disagree. It is not an OpenAPI file.
+The backend defines the contract (`docs/DECISIONS.md`); the source is `docs/01-SPEC-v3.md` section 7. This file lists what the code in `apps/api` implements. Base path `/v1`, JSON, `Authorization: Bearer <accessToken>`. Errors: `{ "error": { "code": "...", "message": "..." } }`.
 
-## 1. Implemented: NestJS API (`apps/api`, Part 1)
+A request for another user's resource gets `404`, never `403`.
 
-Global prefix `/v1`. Errors have the shape `{ "error": { "code": "...", "message": "..." } }`. Protected routes need `Authorization: Bearer <accessToken>`.
+## Auth
 
-| Method and path | Auth | Request | Success response | Errors |
-|---|---|---|---|---|
-| `POST /v1/auth/bootstrap-admin` | `X-Bootstrap-Token` header | none | `{ ok: true, hadUsers }` | `401 BOOTSTRAP_TOKEN_REQUIRED`; `403 FORBIDDEN` (users exist and token differs from `ADMIN_BOOTSTRAP_TOKEN`); `500 ADMIN_NOT_CONFIGURED` |
-| `POST /v1/auth/login` | none | `{ email, password }` | `{ accessToken, refreshToken, tokenType: "Bearer", expiresIn: 900 }` | `401 INVALID_CREDENTIALS`; `429 RATE_LIMITED` |
-| `GET /v1/auth/me` | Bearer | none | id, email, role, isAdmin, adminUnlimited, emailVerified, mustChangePassword, firstName, lastName, themePref, createdAt | `401 UNAUTHORIZED` |
-| `POST /v1/profiles` | Bearer | `name`, `headerFullName`, `headerCity`, `headerPhones[]` (non-empty), `headerEmail`, optional `linkedIn`, `isDefault` | the profile | `402 PROFILE_LIMIT_REACHED` |
-| `GET /v1/profiles` | Bearer | none | the caller's profiles, each with `settings` | |
-| `PATCH /v1/profiles/:id` | Bearer | any subset of the create fields | the profile | `404 PROFILE_NOT_FOUND` |
-| `POST /v1/profiles/:id/bases` | Bearer | multipart field `file` (max 10 MB) | the new `BaseResume` (becomes the active one) | `400 FILE_REQUIRED`; `422 INVALID_FILENAME` (R18); `422 EMPTY_DOCUMENT`; `404 PROFILE_NOT_FOUND` |
-| `POST /v1/jds` | Bearer | `profileId`, plus `sourceType` (`paste`/`url`/`file`) with `text`, `url` or multipart `file` (`.docx` or `.txt`, max 10 MB) | `{ id, status, sourceType, extractedChars, createdAt }` | `422 JD_UNUSABLE` (under 200 characters); `422 URL_FETCH_FAILED`; `400 INVALID_URL`; `422 UNSUPPORTED_FILE`; `404 PROFILE_NOT_FOUND` |
-| `GET /v1/jds/:id` | Bearer | none | the stored job description | `404 JD_NOT_FOUND` |
-
-Behaviours worth knowing:
-- Login rate limit: 5 attempts per 15 minutes per IP when the email belongs to an admin, otherwise 10. If Redis is unavailable the limiter lets requests through.
-- Profile limits by role: `USER` 1, `PRO` 3, `AGENCY` and `ADMIN` unlimited.
-- `bootstrap-admin` succeeds for any non-empty token while the database has no users.
-- The access token lives 15 minutes; a refresh token is stored (hashed) in `Session` and returned in the response body. There is no refresh or logout route.
-
-## 2. Written but not mounted: run endpoints (`run.worker.ts`, Part 2)
-
-`runsRouter` is an Express router. `AppModule` does not import or mount it, and it reads `req.user` as `{ id, isAdmin }`, so it needs a mount point and an auth middleware before it can be used.
-
-| Method and path (relative to the mount) | Request | Response |
+| Method and path | Request | Response |
 |---|---|---|
-| `POST /` | `{ input: { kind: "paste" \| "file" \| "url", pasteText?, fileBufferB64?, filename?, mimeType?, url? }, overrides?: { contactLocationOverride? } }` | `202 { runId, jobId, status }` |
-| `GET /:id` | none | status, progress, pendingCompany, analysis, rewrite, assembled, validationFlags, logs (first 500), timestamps |
-| `POST /:id/confirm-company` | `{ company }` (at least 2 characters) | `202 { runId, jobId, status: "QUEUED" }`; `409 RUN_NOT_AWAITING_CONFIRM` if the run isn't paused |
+| `POST /auth/login` | `{ email, password }` | `200 { user, accessToken, tokenType, expiresIn: 900 }`. Sets the refresh cookie. With header `X-Client-Platform: ios\|android\|desktop` the body also has `refreshToken`. |
+| `POST /auth/refresh` | cookie, or `{ refreshToken }` | `200 { accessToken, ... }`. The refresh token is rotated. A token that was already rotated revokes every session of that user (`401 REFRESH_REUSED`). |
+| `POST /auth/logout` | cookie, or `{ refreshToken }` | `204`. Always succeeds. |
+| `GET /auth/me` | | `200 { user }` |
+| `POST /auth/bootstrap-admin` | header `X-Bootstrap-Token` | `{ ok, hadUsers }`. Succeeds while there are no users, or when the token matches `ADMIN_BOOTSTRAP_TOKEN`. |
 
-`GET` and `confirm-company` return `403` for runs owned by someone else unless the caller is an admin.
+Refresh cookie: `re_refresh`, HttpOnly, SameSite=Lax, `Path=/v1/auth`, 30 days, Secure in production. Access tokens last 15 minutes. Login limits: 10 attempts per 15 minutes per IP, 5 for admins.
 
-## 3. What the frontend calls
+## Profiles
 
-All paths are under `/api`, and the client expects JSON. Status compares each call with sections 1 and 2.
+| Method and path | Notes |
+|---|---|
+| `POST /profiles` | `{ name, headerFullName, headerCity, headerPhones[], headerEmail, linkedIn?, isDefault? }`. `402 PROFILE_LIMIT_REACHED`: USER 1, PRO 3, AGENCY and ADMIN unlimited. |
+| `GET /profiles` | Array. |
+| `GET /profiles/:id` | With `roles`, `education`, `certs`, `bases`. |
+| `PATCH /profiles/:id` | Partial header update. |
+| `PUT /profiles/:id/roles` | `{ roles: [{ companyName, title, baseTitle, startDate: "YYYY-MM", endDate?, location?, baseFlagship?, baseBullets[] }] }`. Replaces the roster; array order is the order on the resume. The pipeline will not run without it. |
+| `PUT /profiles/:id/education` | `{ education: [{ institution, degree, field?, startYear, endYear? }] }` |
+| `PUT /profiles/:id/certs` | `{ certs: [{ name, issuer?, year? }] }` |
+| `POST /profiles/:id/bases` | multipart `file` (.docx, max 10 MB, name must match R18). Becomes the active base. |
+| `PATCH /profiles/:id/bases/:baseId/activate` | |
 
-| Frontend call | Used by | Status |
-|---|---|---|
-| `POST /api/auth/login` → `{ accessToken, user }` | login | Backend path is `/v1/auth/login`; response has no `user`, and also returns `refreshToken` |
-| `POST /api/auth/refresh` → `{ accessToken, user }` (cookie) | session restore, 401 retry | Not implemented |
-| `POST /api/auth/logout` | sign out | Not implemented |
-| `GET/POST /api/profiles` (`{ name }`) | profiles list | Backend create requires header fields, not just `name` |
-| `GET/PATCH /api/profiles/:id` | profile detail | Path differs (`/v1`); `GET /:id` doesn't exist |
-| `POST /api/profiles/:id/resume` (multipart) | profile detail | Backend path is `/v1/profiles/:id/bases` |
-| `POST /api/runs` (JSON or multipart `jdFile`) | new run | Different request shape from the router in section 2, which isn't mounted |
-| `GET /api/runs`, `?limit=`, `?q=`, `?status=` | dashboard, history | Not implemented (router has no list) |
-| `GET /api/runs/:id` | progress, confirm | Section 2 has it; the frontend expects `status` values `queued`, `running`, `awaiting_confirm`, `review`, `completed`, `failed` |
-| `GET /api/runs/:id/stream` (SSE) | progress | Not implemented; client falls back to polling every 2 s |
-| `POST /api/runs/:id/confirm-company` | confirm | Section 2 |
-| `GET /api/runs/:id/review` | review | Not implemented |
-| `POST /api/runs/:id/sections/:sectionId/regenerate` | review | Not implemented |
-| `PATCH /api/runs/:id/bullets/:bulletId` `{ text }` | review | Not implemented |
-| `POST /api/runs/:id/duplicate` | history | Not implemented |
-| `GET/PATCH /api/settings` | settings | Not implemented |
-| `GET/PATCH /api/agency/branding`, `POST /api/agency/branding/logo` | agency branding | Not implemented |
-| `GET /api/admin/users`, `/runs`, `/runs/:id`, `/audit?limit=200` | admin screens | Not implemented |
-| `POST /api/admin/runs/:id/reproduce` with `X-Bootstrap-Token` | reproduce | Not implemented |
-| `POST /admin/2fa/enroll` | (no screen yet) | Named in the sign-off notes; Part 3 section E was meant to contain it but is missing |
+## Job descriptions
 
-The frontend also describes users with roles `owner | admin | member`, while the database enum is `USER | PRO | AGENCY | ADMIN`.
+| Method and path | Notes |
+|---|---|
+| `POST /jds` | `{ profileId, sourceType: "paste", rawText }`, or `{ profileId, sourceType: "url", sourceUrl }`, or multipart `file` (.docx or .txt). `422 JD_UNUSABLE` under 200 characters. (`text` and `url` are accepted as older aliases.) Extraction is synchronous. |
+| `GET /jds/:id` | |
+
+## Runs
+
+| Method and path | Notes |
+|---|---|
+| `POST /runs` | `{ profileId, jdId, baseResumeId?, settingsOverride?, contactLocationOverride? }` returns `202 { runId, status, eventsUrl }`. Applies the quota gate: `402 RUN_LIMIT_REACHED` (PRO, 10 a month) or `402 NO_CREDITS` (USER). Admins with `adminUnlimited` and AGENCY are unlimited. |
+| `GET /runs` | `?status&limit&cursor` returns `{ items, nextCursor }`. |
+| `GET /runs/:id` | Status, stage, progress, `pendingCompany` while awaiting confirmation. |
+| `GET /runs/:id/events` | Server sent events: `{ status, stage, progress, errorCode }`. Ends at a terminal state. |
+| `POST /runs/:id/confirm-company` | `{ companyName }`. Only while `AWAITING_COMPANY_CONFIRM` (`409` otherwise). Continues at stage 4. |
+| `POST /runs/:id/cancel` | |
+| `POST /runs/:id/retry` | Failed runs only. Does not spend another run. |
+| `GET /runs/:id/output` | `{ outputJson, atsScore, metrics, keywordCount, targetCompanies, validation }`. `409` until there is output. |
+| `GET /runs/:id/validation` | `{ passed, flags, counts }`. Each flag: `ruleId`, `code`, `severity`, `blocking`, `field`, `message`. |
+| `GET /runs/:id/docx`, `/pdf` | `{ url, expiresAt }` (signed, 15 minutes, `Cache-Control: no-store`). `?redirect=1` answers `302`. |
+| `DELETE /runs/:id` | `204`. Finished runs only. |
+
+Statuses: `QUEUED, READING_JD, ANALYZING, AWAITING_COMPANY_CONFIRM, REWRITING, VALIDATING, RENDERING, EXPORTING_PDF, COMPLETE, FAILED, CANCELLED`. Error codes on a failed run: `JD_UNUSABLE`, `PROFILE_ROSTER_MISSING`, `COMPANY_MISSING`, `VALIDATION_FAILED`, `PIPELINE_ERROR`.
+
+## Settings and branding
+
+| Method and path | Notes |
+|---|---|
+| `GET /settings`, `PUT /settings` | The ten toggles; `PUT` takes any subset and rejects unknown keys or non booleans with `400`. |
+| `GET /me/branding`, `PUT /me/branding` | `{ displayName, contactEmail?, contactPhone?, footerText?, primaryColor? }`. Writing needs AGENCY (admins pass), else `403`. |
+
+## Admin
+
+Admin routes answer `404` to everyone else, and the admin flag is re-read from the database on every request (a JWT claim is not trusted).
+
+| Method and path | Notes |
+|---|---|
+| `GET /admin/users` | `{ items, nextCursor }` with plan, runs this month, whether 2FA is on. |
+| `GET /admin/runs`, `GET /admin/runs/:id` | All runs; detail adds logs, flags and the pinned versions. |
+| `POST /admin/runs/:id/reproduce` | `202`. Clones the pinned rule set, prompts, base resume and settings snapshot into a new run owned by the admin. Audited. |
+| `GET /admin/audit` | |
+| `POST /admin/2fa/enroll` | Not `GET`. Authenticate with an admin JWT, or with the `X-Bootstrap-Token` header plus `{ adminId }` in the body. Returns the secret, QR code and recovery codes once. Pending until verified. `409 ALREADY_ENROLLED` once confirmed. |
+| `POST /admin/2fa/verify` | `{ code }`. Confirms enrollment. |
+
+The TOTP seed is stored AES-256-GCM encrypted (`TOTP_ENCRYPTION_KEY`), recovery codes are stored as SHA-256 hashes, and every step writes an `AdminAction` row. **Sign in does not ask for a code yet** (`POST /auth/login/totp` is not built).
+
+## In the spec but not built
+
+Public signup, password reset, Google OAuth, `/auth/login/totp`; `/users/*`; `DELETE /profiles/:id` and `/profiles/:id/settings`; the whole fact bank API (`/profiles/:id/facts`, `/facts/:id`); `GET /jds`; `regenerate-section`, `PATCH /runs/:id/output` and `approve`; batches; billing and Stripe webhooks; branding logo upload; admin user edits, credits and refunds; health endpoints and metrics; API keys; `Idempotency-Key`.
+
+The fact bank has a database model and the pipeline uses it, but until its endpoints exist, entries have to be inserted directly.

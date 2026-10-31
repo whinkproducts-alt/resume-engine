@@ -1,45 +1,43 @@
 # Frontend (Stage 4) — Next.js 14
 
-Code: `apps/web`. Original source document: `docs/source-parts/Resume_Master_Engine_part_4.txt`.
+Code: `apps/web`. The original Part 4 document is `docs/source-parts/Resume_Master_Engine_part_4.txt`. The code was then aligned to the backend contract (see [DECISIONS.md](./DECISIONS.md) and [CHANGES_FROM_SOURCE.md](./CHANGES_FROM_SOURCE.md)).
 
-Stack (from `apps/web/package.json`): Next.js 14.2.15 (App Router), React 18, TypeScript, Tailwind 3, TanStack Query 5, axios and zod (declared as dependencies), lucide-react, react-dropzone, date-fns.
+Stack: Next.js 14.2 (App Router), React 18, TypeScript, Tailwind 3, TanStack Query 5, react-dropzone, date-fns, lucide-react.
 
 ## Screens
 
 Route groups `(app)` and `(admin)` do not appear in URLs.
 
-| # | URL | File under `apps/web/src/app/` | What it does |
-|---|---|---|---|
-| 01 | `/dashboard` | `(app)/dashboard/page.tsx` | Five most recent runs (`GET /api/runs?limit=5`) |
-| 02 | `/profiles` | `(app)/profiles/page.tsx` | List profiles; create one with a name |
-| 03 | `/profiles/[id]` | `(app)/profiles/[id]/page.tsx` | View/edit a profile; upload a base résumé |
-| 04 | `/new` | `(app)/new/page.tsx` | Start a run: choose profile, then JD by paste, file or URL |
-| 05 | `/runs/[id]` | `(app)/runs/[id]/page.tsx` | Progress through five stages (SSE, falls back to polling) |
-| 06 | `/runs/[id]/confirm` | `(app)/runs/[id]/confirm/page.tsx` | Confirm the inferred company (shows confidence and evidence) |
-| 07 | `/runs/[id]/review` | `(app)/runs/[id]/review/page.tsx` | Two-pane review: edit bullets, regenerate a section, see validation flags, download DOCX/PDF |
-| 08 | `/history` | `(app)/history/page.tsx` | Search/filter past runs; duplicate a run |
-| 09 | `/settings` | `(app)/settings/page.tsx` | Ten accuracy toggles, theme note, account |
-| 10 | `/admin/users` | `(admin)/admin/users/page.tsx` | Users with monthly run usage and limit |
-| 11 | `/admin/runs` | `(admin)/admin/runs/page.tsx` | All runs |
-| 12 | `/admin/audit` | `(admin)/admin/audit/page.tsx` | Audit log (limit 200) |
-| 13 | `/admin/reproduce` | `(admin)/admin/reproduce/page.tsx` | Re-run a run; sends `X-Bootstrap-Token` |
-| 14 | `/agency-branding` | `(app)/agency-branding/page.tsx` | Logo, primary colour, footer text |
-| — | `/login` | `login/page.tsx` | Email and password sign-in |
+| URL | What it does | API |
+|---|---|---|
+| `/login` | Email and password sign in | `POST /auth/login` |
+| `/dashboard` | Five most recent runs | `GET /runs?limit=5` |
+| `/profiles` | List; create (name, full name, city, phones, email, LinkedIn) | `GET`, `POST /profiles` |
+| `/profiles/[id]` | Edit header, upload and activate base résumés, edit the roster (roles, education, certifications) | `GET`, `PATCH /profiles/:id`, `/bases`, `PUT .../roles`, `.../education`, `.../certs` |
+| `/new` | Choose profile, add the JD (paste, file, URL), optional location override, generate | `POST /jds`, then `POST /runs` |
+| `/runs/[id]` | Live progress, cancel, retry, error text | `GET /runs/:id`, `/events`, `POST .../cancel`, `.../retry` |
+| `/runs/[id]/confirm` | Confirm the inferred company | `POST .../confirm-company` |
+| `/runs/[id]/review` | JD beside the résumé preview and the validator; DOCX and PDF downloads. Read only. | `GET .../output`, `.../validation`, `.../docx`, `.../pdf`, `GET /jds/:id` |
+| `/history` | Filter by status, filter loaded rows by text, load more, download, run again | `GET /runs?status&cursor`, `POST /runs` |
+| `/settings` | The ten toggles (three are applied by the pipeline today, seven are saved only) | `GET`, `PUT /settings` |
+| `/agency-branding` | Name, contact, footer text, accent colour. Saving needs an Agency account. | `GET`, `PUT /me/branding` |
+| `/admin/users`, `/admin/runs`, `/admin/audit` | Admin tables | `GET /admin/...` |
+| `/admin/reproduce` | Inspect a run's pinned versions and reproduce it | `GET /admin/runs/:id`, `POST .../reproduce` |
+| `/admin/2fa` | Enroll an authenticator app, confirm with a code | `POST /admin/2fa/enroll`, `/verify` |
 
-There is no `app/page.tsx`, so `/` currently has no route (the structure document calls for a redirect to `/dashboard` or `/login`).
+`/` redirects to `/dashboard` or `/login`.
 
-Progress stages shown on screen 05: Ingest JD, Parse profile, Draft sections, Validate, Render.
+## How it talks to the backend
 
-## Shell, auth and data
+- Every call is under `/v1` (`src/lib/api.ts`). `next.config.mjs` rewrites `/v1/*` to `API_ORIGIN`, so the browser stays on one origin and the refresh cookie (`Path=/v1/auth`) is first party.
+- The access token is held in memory. On load, `POST /auth/refresh` (cookie) then `GET /auth/me` restores the session. A 401 triggers one shared refresh and one retry; auth endpoints are never retried.
+- Errors arrive as `{ error: { code, message } }` and are thrown as `ApiError(status, code, message)`.
+- Progress uses the SSE endpoint, read with `fetch` because `EventSource` cannot send an Authorization header, and falls back to polling `GET /runs/:id` every 2 seconds.
 
-- **Providers** (`components/providers.tsx`): TanStack Query (30 s stale time, no refetch on window focus, one retry for queries, none for mutations) and `AuthProvider`. Query devtools load in development only.
-- **Auth** (`lib/auth.tsx`, `lib/api.ts`): the access token is held in memory. On load the app calls `POST /api/auth/refresh` with credentials included. A 401 on any request triggers one refresh and one retry.
-- **Guards**: `(app)/layout.tsx` redirects to `/login` when signed out. `(admin)/layout.tsx` also redirects to `/dashboard` unless the role is `admin` or `owner`.
-- **Navigation** (`components/app-shell.tsx`): Dashboard, Profiles, New run, History, Settings, Agency; admin nav is Users, Runs, Audit, Reproduce.
-- **Types** (`lib/types.ts`): `User`, `Profile`, `Run`, `ValidationFlag`, `Section`, `Bullet`, `RunReview`, `HistoryRow`, `AuditEntry`, `Branding`, `Settings`.
+## What is not there
 
-The endpoints these screens call are listed in [API.md](./API.md), with their status against the backend.
+Inline bullet editing and per section regenerate (the backend has no endpoints for them yet), a fact bank screen, billing, batches, a logo upload, and a sign in code prompt for 2FA.
 
-## Not in the provided code
+## Tests
 
-The 2FA admin page, `hooks/`, `tests/`, and the config files `.eslintrc.cjs`, `next.config.mjs`, `tsconfig.json`, `vitest.config.ts` and `playwright.config.ts` are in the structure document but not in the source parts.
+`tests/unit` (Vitest): the API client (prefix, bearer, refresh single flight, error envelope, 204), the SSE parser, and the run, form and roster helpers. `pnpm --filter @resume-engine/web test`. A production `next build` passes and the sign in page was checked in headless Chromium; no screen has been driven against a running backend.

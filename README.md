@@ -1,53 +1,66 @@
 # Resume Engine
 
-Deterministic résumé tailoring engine for agencies.
-Owner: Victor Igboekwe (Whink Apps).
+Deterministic résumé tailoring engine for agencies and job seekers.
+Owner: Victor Igboekwe (Whink Apps). Proprietary, all rights reserved (see `LICENSE`).
+
+Paste a job description, press one button, get a tailored, ATS ready `.docx` (and a PDF) that has passed twenty written rules.
 
 ## Repo layout
-| Path                | Purpose                                           |
-|---------------------|---------------------------------------------------|
-| `apps/web`          | Next.js 14 frontend (the Stage 4 deliverable)     |
-| `apps/api`          | Backend reference (pipeline, validator, renderer) |
-| `packages/shared`   | Types, rule helpers, constants (R2, R9, R10, R18) |
-| `docs/`             | Specs, architecture, design tokens                |
-| `infrastructure/`   | Docker, Terraform, K8s                            |
 
-## Prerequisites
-- Node 20 (`.nvmrc`)
-- pnpm 9
-- Docker (for local Postgres + Redis)
+| Path | Purpose |
+|---|---|
+| `apps/web` | Next.js 14 frontend |
+| `apps/api` | NestJS API, BullMQ pipeline and worker, Prisma schema and migrations |
+| `packages/rules` | The validator: rules R1 to R20 and the fact bank check |
+| `packages/renderer` | DOCX renderer (section 6 layout) |
+| `packages/qa` | LibreOffice PDF conversion and page count |
+| `packages/storage` | S3 / R2 storage and signed URLs |
+| `docs/` | Spec, rules, API, architecture, decisions |
+| `infrastructure/` | Docker Compose for local Postgres and Redis |
 
 ## Quick start
+
+Needs Node 22, pnpm 9, Docker, and LibreOffice for the pipeline. Details in [docs/ONBOARDING.md](docs/ONBOARDING.md).
+
 ```bash
 pnpm install
-cp .env.example .env
-pnpm bootstrap           # docker up + migrate + seed
-pnpm dev                 # web :3000, api :4000
+bash scripts/bootstrap.sh
+pnpm --filter @resume-engine/api dev
 ```
 
 ## Scripts
-| Command            | What it does                              |
-|--------------------|-------------------------------------------|
-| `pnpm dev`         | Run web + api in watch mode (Turborepo)   |
-| `pnpm build`       | Build all packages/apps                   |
-| `pnpm lint`        | ESLint + Prettier check                   |
-| `pnpm typecheck`   | `tsc --noEmit` across workspaces          |
-| `pnpm test`        | Vitest unit + integration                 |
-| `pnpm test:e2e`    | Playwright end-to-end                     |
-| `pnpm check:tokens`| Fails if design tokens are hardcoded in `src/` |
 
-## Authoritative decisions (Phase 1, approved by Victor)
-- **R18 filename regex** — `^[a-zA-Z0-9\s\-_]+_[a-zA-Z0-9\s\-_]+_[a-zA-Z0-9\s\-_]+\.docx$`
-- **R2 close variant** — 70% token overlap, ignores stop words ("Senior", "Lead", …)
-- **R9 LLM judged** — records `warn`, never blocks the run
-- **R10 duplicate verb** — per-résumé, `warn` severity, non-blocking
-- **2FA** — `POST /admin/2fa/enroll`
-- **Bootstrap token** — `X-Bootstrap-Token` header
+| Command | What it does |
+|---|---|
+| `pnpm dev` | Dev servers for the web app and the API (Turborepo) |
+| `pnpm build` | Build every workspace |
+| `pnpm lint` | ESLint (web) and type check (api) |
+| `pnpm typecheck` | `tsc --noEmit` in every workspace |
+| `pnpm test` | Vitest in every workspace |
+| `pnpm check:tokens` | Fails on hard coded colours in `apps/web/src` |
+
+## Decisions
+
+1. The Prisma schema is the source of truth; the worker adapts to it.
+2. The backend defines the API contract; the frontend adapts to it.
+3. Proprietary licence.
+
+Details and precedence between the spec documents: [docs/DECISIONS.md](docs/DECISIONS.md). Authoritative sign offs: R18 filename regex, R2 close variant at 70% token overlap, R9 LLM judged and non blocking, R10 per resume and warn only, `POST /admin/2fa/enroll`, bootstrap token in the `X-Bootstrap-Token` header.
 
 ## Docs
-- `docs/source-parts/` — the original Stage 1–4 master code documents (Parts 1–4), kept unmodified. The source files under `apps/` and `packages/` were extracted verbatim from them.
-- [Architecture](docs/ARCHITECTURE.md), [API](docs/API.md), [Rules](docs/RULES.md), [Design tokens](docs/DESIGN_TOKENS.md) and [Frontend](docs/03-FRONTEND-STAGE4.md) are drafted from the code.
-- Master spec and ruleset (`docs/01-SPEC-v3.md`, `docs/02-RESUME_ENGINE_SPEC.md`), plus deployment and onboarding guides, have not been added yet.
 
-## License
-Proprietary — © Whink Apps. See `LICENSE`.
+| | |
+|---|---|
+| [01-SPEC-v3.md](docs/01-SPEC-v3.md) | Master technical specification |
+| [RULES.md](docs/RULES.md) | R1 to R20 as implemented |
+| [API.md](docs/API.md) | Endpoints, and what is not built |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | How it fits together, known gaps |
+| [DESIGN_TOKENS.md](docs/DESIGN_TOKENS.md), [03-FRONTEND-STAGE4.md](docs/03-FRONTEND-STAGE4.md) | UI |
+| [ONBOARDING.md](docs/ONBOARDING.md), [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Running and deploying |
+| [CHANGES_FROM_SOURCE.md](docs/CHANGES_FROM_SOURCE.md) | Everything changed from the supplied code, and why |
+| `docs/source-parts/` | The supplied documents, unmodified |
+| `docs/03-ui-reference/resume-engine.html` | The supplied UI reference |
+
+## Licence
+
+Proprietary. Copyright (c) 2026 Whink Apps (Whink Group). All rights reserved. See `LICENSE`.

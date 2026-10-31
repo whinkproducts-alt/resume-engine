@@ -18,7 +18,7 @@ Source of truth: `apps/web/src/app/globals.css` (CSS variables) and `apps/web/ta
 | `--success` | `#22c55e` | `success` |
 | `--danger` | `#f05252` | `danger` |
 
-Text selection uses `rgba(212,160,23,0.35)` (a literal in `globals.css`, not a token).
+Text selection uses `rgba(212,160,23,0.35)`, a literal in `globals.css` (the one file allowed to hold colours).
 
 ## Typography
 
@@ -60,6 +60,14 @@ Text selection uses `rgba(212,160,23,0.35)` (a literal in `globals.css`, not a t
 | `EmptyState` | `title`, `description?`, `action?` |
 | `Spinner`, `Skeleton` | `className?` |
 
-## Not yet enforced
+## Opacity modifiers
 
-The structure document describes a `check:tokens` script (`scripts/check-tokens.ts`) that fails on hard-coded colours in `src/`. That script has not been added. `globals.css` itself contains one literal colour outside the variables (the selection colour above).
+`tailwind.config.ts` wraps each token as `color-mix(in srgb, var(--token) calc(<alpha-value> * 100%), transparent)`. Without that, Tailwind cannot apply `/10` or `/40` to a bare `var(--token)` and the build fails. The hex values above are unchanged.
+
+## Colours of generated documents
+
+The DOCX has its own colours (accent `1F3864`, rules `2E74B5`), defined in `packages/renderer`. The web app mirrors the default accent in `src/lib/document-colors.ts` for the branding form.
+
+## Enforcement
+
+`pnpm check:tokens` (`scripts/check-tokens.ts`) fails on any hex, `rgb()` or `hsl()` literal in `apps/web/src` except `globals.css` and `document-colors.ts`.

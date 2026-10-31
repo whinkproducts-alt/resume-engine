@@ -1,60 +1,74 @@
 # Architecture
 
-What the provided code (Parts 1–4) implements today. Planned pieces that were not received are listed at the end.
+What the code does today. Decisions behind it are in [DECISIONS.md](./DECISIONS.md); the product spec is [01-SPEC-v3.md](./01-SPEC-v3.md).
 
-## Components
+## Workspaces
 
-| Component | Location | Tech |
-|---|---|---|
-| Web app | `apps/web` | Next.js 14 App Router, React 18, Tailwind, TanStack Query |
-| API | `apps/api/src` (except `workers/`) | NestJS, Prisma, PostgreSQL, argon2, JWT (HS256), ioredis |
-| Pipeline worker | `apps/api/src/workers/run.worker.ts` | BullMQ on Redis, OpenAI chat completions with JSON schema, mammoth, pdf-parse |
-| Rule types | `packages/rules/src/types.ts` | TypeScript types and default rule config |
-
-The API modules are `PrismaModule`, `RateLimitModule`, `AuthModule`, `ProfilesModule` and `JdsModule`. The worker and its Express router are a separate file that `AppModule` does not import.
-
-## Data model (`apps/api/prisma/schema.prisma`)
-
-| Group | Models |
+| Path | What it is |
 |---|---|
-| Identity | `User`, `Session`, `PasswordResetToken`, `OAuthAccount`, `AdminAction` |
-| Profile content | `Profile`, `BaseResume`, `RoleEntry`, `Education`, `Certification`, `FactBankEntry`, `ProfileSettings` |
-| Inputs and runs | `JobDescription`, `Run`, `RunLog`, `ValidationFlag`, `KeywordSet`, `AlignedCompany`, `Document` |
-| Configuration | `RuleSet`, `PromptVersion`, `UserSettings` |
-| Billing | `Plan`, `Subscription`, `Payment`, `RunCredit`, `UsageCounter`, `BrandingConfig` |
+| `apps/web` | Next.js 14 (App Router), React 18, Tailwind, TanStack Query. Talks to the API only through `/v1`, which Next proxies to `API_ORIGIN`. |
+| `apps/api` | NestJS 10 on Prisma and PostgreSQL. Also holds the pipeline (`src/pipeline`) and the worker entrypoint (`src/workers/worker-main.ts`). |
+| `packages/rules` | The validator: R1 to R20, the fact bank check, the retry loop. Pure TypeScript, no I/O. |
+| `packages/renderer` | `ResumeDoc` to DOCX with the `docx` library, to the section 6 layout. |
+| `packages/qa` | DOCX to PDF with LibreOffice headless, page count, overflow flag. |
+| `packages/storage` | S3 / Cloudflare R2 uploads and signed URLs. |
 
-Roles: `USER`, `PRO`, `AGENCY`, `ADMIN`. Run statuses: `QUEUED`, `READING_JD`, `ANALYZING`, `AWAITING_COMPANY_CONFIRM`, `REWRITING`, `VALIDATING`, `RENDERING`, `EXPORTING_PDF`, `COMPLETE`, `FAILED`, `CANCELLED`. `Run.baseResumeId` is required; `resolveBaseResumeId` defaults it to the profile's active base résumé.
+The packages build to CommonJS (`tsconfig.base.json`) because the Nest app is CommonJS.
 
-## Pipeline (worker, stages 0–5)
+## Processes
 
-| Stage | Name | What it does |
+```
+browser ──/v1──> web (Next) ──rewrite──> api (Nest) ──> PostgreSQL
+                                           │  enqueue
+                                           ▼
+                                        Redis ◀── worker (BullMQ) ──> LLM, S3/R2, LibreOffice
+```
+
+The API and the worker are separate processes from the same build (`pnpm --filter @resume-engine/api start` and `... worker`). The API only enqueues; it never calls the model.
+
+## The pipeline (`apps/api/src/pipeline`)
+
+`runPipeline` in `run-pipeline.ts` is plain TypeScript over a repository interface (`types.ts`), so it is tested with an in-memory repo, a scripted LLM and a fake store. `prisma-repo.ts` is the Prisma implementation.
+
+| Stage | Where | What happens |
 |---|---|---|
-| 0 | Quota gate | Admins bypass. Others need a `Quota` row and fewer runs than `runsPerPeriod` |
-| 1 | Ingest | Extracts text from paste, PDF, DOCX or URL; fails under 200 characters |
-| 2 | Analyze | One LLM call returns company, confidence, role, seniority, industry, locations, skills, years. Confidence under 0.75 adds an R9 `warn` |
-| 3 | Confirm | If the company was inferred or confidence is under 0.75, the run pauses as `AWAITING_COMPANY_CONFIRM` |
-| 4 | Rewrite | Six LLM calls: headline, summary, competencies, roles (bullets only), keywords, targets. R10 `warn` on repeated bullet-opening words |
-| 5 | Assemble | Merges sections; checks locked role headers and dates; picks the contact location (override, else first target location) |
-| 6–7 | Validate, export | Not received. The pipeline currently ends at stage 5 and marks the run complete |
+| 0 Quota gate | `RunsService.create`, `QuotaService` | At run creation, in one transaction with the run row. USER spends a credit, PRO counts against 10 a month. |
+| 1 Ingest | `POST /jds`, then a guard in the worker | Text is extracted when the JD is stored. The worker checks it is at least 200 characters and that the profile has a roster. |
+| 2 Analyze | `run-pipeline.ts` | One LLM call with a strict JSON schema. The result is stored on `JobDescription`. |
+| 3 Confirm | | If the company was inferred or confidence is under 0.75, the run stops at `AWAITING_COMPANY_CONFIRM`. `confirm-company` resumes at stage 4 and does not analyze again. |
+| 4 Rewrite | `sections.ts`, `prompts.ts` | One call per section: headline, summary, competencies, each role, keywords, targets. |
+| 5 Assemble | `assemble()` | Header, roster (company, dates, order), education and certifications are copied from the database, never from the model. The contact location override is applied to the city. |
+| 6 Validate | `packages/rules` | Blocking failures regenerate only the failing sections, with the failure text in the prompt. Up to 2 retries. |
+| 7 Render | `packages/renderer` | AGENCY runs get their accent colour and footer text. |
+| 8 Export | `packages/qa`, `packages/storage` | PDF, page count, upload of DOCX, PDF and a validation report. |
 
-Every step and LLM call writes a `RunLog` row. Jobs retry 3 times with exponential backoff (5 s base). Concurrency is `WORKER_CONCURRENCY` (default 4).
+Everything the worker writes goes to existing models: `JobDescription` (analysis), `Run` (status, stage, progress, `outputJson`, `validation`, keys, counts), `RunLog` (every step and LLM call with model and tokens), `ValidationFlag`, `KeywordSet`, `AlignedCompany`, `Document`. No schema change was needed for the pipeline.
 
-## Frontend flow
+Each run pins `RuleSet` (version `v3.1`), the prompt version, the `BaseResume` and a settings snapshot (`Run.settingsSnap`), which is what `POST /admin/runs/:id/reproduce` replays.
 
-Sign in, pick a profile, submit a job description (paste, file or URL), watch progress, confirm the company if asked, review and edit bullets next to the validation flags, then download DOCX and PDF. See [03-FRONTEND-STAGE4.md](./03-FRONTEND-STAGE4.md).
+## Data model
 
-## Known gaps found while reading the code
+`apps/api/prisma/schema.prisma` is the source of truth. Migrations:
 
-These are observations from the provided files, not tested behaviour.
+| Migration | Purpose |
+|---|---|
+| `20261031000000_init` | The schema from `01-SPEC-v3.md` section 4 (28 tables). |
+| `20261031010000_admin_2fa` | `User.totpSecretEnc`, `totpEnabledAt`, `totpRecoveryHashes`, for admin 2FA. |
 
-1. **Frontend and backend don't line up.** The web app calls `/api/...` and expects cookie-based refresh; the API serves `/v1/...` and returns a refresh token in the body. See [API.md](./API.md).
-2. **Worker and schema don't line up.** The worker uses `Quota`, `Run.sourceText/analysis/rewrite/assembled/pendingCompany`, `RunLog.stage/level/message/meta` and statuses `QUOTA_CHECK`, `INGESTING`, `ASSEMBLING`, `COMPLETED`. None of these exist in the Part 1 schema, which has `COMPLETE`, `step`/`status` on `RunLog` and a different `ValidationFlag`.
-3. **Company confirmation restarts the pipeline.** `confirm-company` re-enqueues the whole run; stage 2 re-analyzes and can pause again, and file or URL runs fail at ingest because only `pasteText` is passed on.
-4. **Locked role data is never produced.** Stages 4 and 5 read `analysis.rawRoles`, but the stage 2 schema doesn't include it, so the "locked" header list is empty.
-5. **`apps/web/src/lib/api.ts` uses the `Run` type without importing it.**
-6. **URL fetching has no network restrictions.** Both `JdsService` and the worker fetch any `http`/`https` URL.
-7. **Rule logic is duplicated** (three R18 regexes, two R2 stop-word lists) (see [RULES.md](./RULES.md)), and `tokenOverlapPct` is never called.
+## Frontend
 
-## Not received
+See [03-FRONTEND-STAGE4.md](./03-FRONTEND-STAGE4.md). The access token lives in memory; the HttpOnly refresh cookie restores the session, and one shared refresh handles concurrent 401s.
 
-Rule validator and retry loop, DOCX renderer, PDF/page QA, artifact storage, stages 6–7, the 2FA enrollment endpoint, `packages/shared`, project config for `apps/api`, and infrastructure files.
+## Known gaps
+
+- **Review is read only.** There is no `regenerate-section`, `PATCH /runs/:id/output` or `approve` on the backend, so the UI does not offer inline editing.
+- **No fact bank endpoints.** The pipeline reads the fact bank; entries must be inserted into the database directly until the API exists.
+- **No base resume parser.** Uploading a base résumé stores its text. The roster and education are entered by hand on the profile page.
+- **R9 never runs for real.** Nothing produces the LLM judgement the rule consumes.
+- **2FA is not enforced at sign in.** Enrollment and confirmation work; the login challenge does not exist.
+- **Only OpenAI is wired.** `LLM_PROVIDER=anthropic` throws at start.
+- **No logo upload** for agency branding.
+- **`FAILED` also means "needs review".** A run that still breaks blocking rules after retries ends `FAILED` with `errorCode=VALIDATION_FAILED`, because `RunStatus` has no review state. Its draft and flags remain readable.
+- **A cancel while the worker is mid LLM call** is only noticed at the next check; later writes never overwrite `CANCELLED`.
+- **URL job descriptions** are fetched from any `http`/`https` address with no allow list, which would let a user make the server request internal addresses. Worth restricting before public launch.
+- **CSRF** on the cookie endpoints rests on SameSite=Lax and POST-only routes; the double submit token from the spec is not built.
