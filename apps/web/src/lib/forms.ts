@@ -20,3 +20,9 @@ export function toIntOrNull(v: string): number | null {
 
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 export const isMonth = (v: string) => MONTH.test(v);
+
+/** Mirrors the API's rule for a metric's value: "40", "1.2", "2M", "$2M", "1,200", "12 users". */
+export function metricLooksValid(value: string): boolean {
+  const mv = value.trim().replace(/^\$/, "").replace(/,/g, "");
+  return /^\d+(?:\.\d+)?\s*(?:[a-zA-Z]+|%)?$/.test(mv);
+}

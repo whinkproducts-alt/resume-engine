@@ -28,7 +28,7 @@ Code: `packages/rules/src/rules/index.ts`. Config and defaults: `packages/rules/
 | R18 | File name format | `^[a-zA-Z0-9\s\-_]+_[a-zA-Z0-9\s\-_]+_[a-zA-Z0-9\s\-_]+\.docx$` (Victor's sign-off). | Blocking |
 | R19 | No leftover base text | Fails when a flagship or bullet equals base text after normalising case and punctuation. Warns when it is 90% similar. | Blocking (exact); warn (near copy) |
 | R20 | Style: short sentences, no hyphens or em dashes | Em and en dashes always fail. Hyphens fail while `banHyphensInProse` is on. Warns on sentences over 28 words. Applies to headline, summary, flagship lines and bullets. | Blocking (dashes); warn (length) |
-| FACTS | Stage 6 "fact bank check on every numeric token" (`01-SPEC-v3.md` section 5) | Every number in the summary, flagship lines and bullets must match a Fact Bank entry (exact number and unit, or an exact alias such as `2M`). Bare years are ignored. With `strictFactsMode` on, a miss or an unverified match blocks; otherwise it warns. | Blocking in strict mode |
+| FACTS | Stage 6 "fact bank check on every numeric token" (`01-SPEC-v3.md` section 5) | Every number in the summary, flagship lines and bullets must match a Fact Bank entry (see [API.md](./API.md#fact-bank)) (exact number and unit, or an exact alias such as `2M`). Bare years are ignored. With `strictFactsMode` on, a miss or an unverified match blocks; otherwise it warns. | Blocking in strict mode |
 
 ## Signed off by Victor
 

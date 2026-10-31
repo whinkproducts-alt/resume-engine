@@ -12,3 +12,4 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - API: auth with rotating refresh cookie, profiles and roster, JDs, runs, settings,
   branding, admin panel, admin 2FA.
 - Web app for all Phase 1 screens.
+- Fact bank API (list, create, verify, import from base résumé, update, delete) and a Fact Bank section on the profile page.

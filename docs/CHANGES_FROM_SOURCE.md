@@ -41,4 +41,4 @@ The four code documents are kept unmodified in `docs/source-parts/`, and the fir
 
 ## Added, not in any supplied document
 
-`LICENSE`, `docs/DECISIONS.md`, the quota service, runs, settings, branding and admin modules, `apps/api` project files, the Prisma migrations, `scripts/check-tokens.ts`, `scripts/bootstrap.sh`, Docker Compose, commit lint and hooks, `CODEOWNERS`, the pull request template, the roster editor, and all tests.
+`LICENSE`, `docs/DECISIONS.md`, the quota service, runs, settings, branding, facts and admin modules, `apps/api` project files, the Prisma migrations, `scripts/check-tokens.ts`, `scripts/bootstrap.sh`, Docker Compose, commit lint and hooks, `CODEOWNERS`, the pull request template, the roster editor, and all tests.

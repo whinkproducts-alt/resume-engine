@@ -62,7 +62,7 @@ See [03-FRONTEND-STAGE4.md](./03-FRONTEND-STAGE4.md). The access token lives in 
 ## Known gaps
 
 - **Review is read only.** There is no `regenerate-section`, `PATCH /runs/:id/output` or `approve` on the backend, so the UI does not offer inline editing.
-- **No fact bank endpoints.** The pipeline reads the fact bank; entries must be inserted into the database directly until the API exists.
+- **Fact bank import is a proposal, not a parser.** It lists the numbers found in the base résumé's text as unverified facts; a person verifies them.
 - **No base resume parser.** Uploading a base résumé stores its text. The roster and education are entered by hand on the profile page.
 - **R9 never runs for real.** Nothing produces the LLM judgement the rule consumes.
 - **2FA is not enforced at sign in.** Enrollment and confirmation work; the login challenge does not exist.

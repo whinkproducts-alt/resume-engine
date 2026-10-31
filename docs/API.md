@@ -30,6 +30,21 @@ Refresh cookie: `re_refresh`, HttpOnly, SameSite=Lax, `Path=/v1/auth`, 30 days, 
 | `POST /profiles/:id/bases` | multipart `file` (.docx, max 10 MB, name must match R18). Becomes the active base. |
 | `PATCH /profiles/:id/bases/:baseId/activate` | |
 
+## Fact bank
+
+Entries are claims a résumé may repeat. In strict mode every number in a generated résumé must match a **verified** fact.
+
+| Method and path | Notes |
+|---|---|
+| `GET /profiles/:id/facts` | `?kind=metric&verified=true`. Verified first. |
+| `POST /profiles/:id/facts` | `{ kind, claimText, metricValue?, metricUnit?, context, employer?, verified?, sourceNote?, roleId? }`. `kind` is one of `metric, date, employer, title, education, skill, other`. A `metric` needs a numeric `metricValue` such as `40`, `1.2` or `2M` (`422 INVALID_METRIC`). `verified` defaults to false. |
+| `POST /profiles/:id/facts/verify` | `{ factIds[] }` returns `{ verified, notFound[] }`. Ids that are not on this profile are reported, not touched. |
+| `POST /profiles/:id/facts/import-from-base` | `{ baseResumeId }`. Proposes one **unverified** metric per number in the base résumé's text, with its sentence (bare years skipped). Safe to repeat; limit 200 per call. Returns `{ created, truncated }`. |
+| `PATCH /facts/:id` | Partial. Changing the claim, number, unit or kind withdraws verification unless the same request sets `verified`. |
+| `DELETE /facts/:id` | `204`. |
+
+For the validator to match a number, set both `metricValue` and `metricUnit` (a fact with value `40` and unit `%` grounds "40%"; `2` and `M` ground "2M").
+
 ## Job descriptions
 
 | Method and path | Notes |
@@ -79,6 +94,4 @@ The TOTP seed is stored AES-256-GCM encrypted (`TOTP_ENCRYPTION_KEY`), recovery 
 
 ## In the spec but not built
 
-Public signup, password reset, Google OAuth, `/auth/login/totp`; `/users/*`; `DELETE /profiles/:id` and `/profiles/:id/settings`; the whole fact bank API (`/profiles/:id/facts`, `/facts/:id`); `GET /jds`; `regenerate-section`, `PATCH /runs/:id/output` and `approve`; batches; billing and Stripe webhooks; branding logo upload; admin user edits, credits and refunds; health endpoints and metrics; API keys; `Idempotency-Key`.
-
-The fact bank has a database model and the pipeline uses it, but until its endpoints exist, entries have to be inserted directly.
+Public signup, password reset, Google OAuth, `/auth/login/totp`; `/users/*`; `DELETE /profiles/:id` and `/profiles/:id/settings`; `GET /jds`; `regenerate-section`, `PATCH /runs/:id/output` and `approve`; batches; billing and Stripe webhooks; branding logo upload; admin user edits, credits and refunds; health endpoints and metrics; API keys; `Idempotency-Key`.

@@ -13,7 +13,7 @@ Route groups `(app)` and `(admin)` do not appear in URLs.
 | `/login` | Email and password sign in | `POST /auth/login` |
 | `/dashboard` | Five most recent runs | `GET /runs?limit=5` |
 | `/profiles` | List; create (name, full name, city, phones, email, LinkedIn) | `GET`, `POST /profiles` |
-| `/profiles/[id]` | Edit header, upload and activate base résumés, edit the roster (roles, education, certifications) | `GET`, `PATCH /profiles/:id`, `/bases`, `PUT .../roles`, `.../education`, `.../certs` |
+| `/profiles/[id]` | Edit header, upload and activate base résumés, edit the roster (roles, education, certifications), manage the fact bank (add, verify, import from the base résumé, delete) | `GET`, `PATCH /profiles/:id`, `/bases`, `PUT .../roles`, `.../education`, `.../certs`, `.../facts` |
 | `/new` | Choose profile, add the JD (paste, file, URL), optional location override, generate | `POST /jds`, then `POST /runs` |
 | `/runs/[id]` | Live progress, cancel, retry, error text | `GET /runs/:id`, `/events`, `POST .../cancel`, `.../retry` |
 | `/runs/[id]/confirm` | Confirm the inferred company | `POST .../confirm-company` |
@@ -36,7 +36,7 @@ Route groups `(app)` and `(admin)` do not appear in URLs.
 
 ## What is not there
 
-Inline bullet editing and per section regenerate (the backend has no endpoints for them yet), a fact bank screen, billing, batches, a logo upload, and a sign in code prompt for 2FA.
+Inline bullet editing and per section regenerate (the backend has no endpoints for them yet), billing, batches, a logo upload, and a sign in code prompt for 2FA.
 
 ## Tests
 

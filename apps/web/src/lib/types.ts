@@ -90,6 +90,35 @@ export interface CreateProfileInput {
   linkedIn?: string;
 }
 
+/* -------------------------------- fact bank -------------------------------- */
+
+export const FACT_KINDS = ["metric", "date", "employer", "title", "education", "skill", "other"] as const;
+export type FactKind = (typeof FACT_KINDS)[number];
+
+export interface FactEntry {
+  id: string;
+  profileId: string;
+  roleId: string | null;
+  kind: FactKind | string;
+  claimText: string;
+  metricValue: string | null;
+  metricUnit: string | null;
+  context: string;
+  employer: string | null;
+  verified: boolean;
+  sourceNote: string | null;
+}
+
+export interface CreateFactInput {
+  kind: FactKind;
+  claimText: string;
+  metricValue?: string;
+  metricUnit?: string;
+  context: string;
+  employer?: string;
+  verified?: boolean;
+}
+
 /* ----------------------------------- JDs ----------------------------------- */
 
 export interface JdCreated {

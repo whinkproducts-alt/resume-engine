@@ -136,6 +136,7 @@ export class FakePrisma {
   runCredit = table('runCredit', this);
   adminAction = table('adminAction', this);
   session = table('session', this);
+  factBankEntry = table('factBankEntry', this);
   brandingConfig = table('brandingConfig', this);
   roleEntry = table('roleEntry', this);
   education = table('education', this);

@@ -7,6 +7,7 @@ import { useDropzone } from "react-dropzone";
 import { UploadCloud } from "lucide-react";
 import { api } from "@/lib/api";
 import { Badge, Button, Card, Input, Skeleton } from "@/components/ui";
+import { FactsEditor } from "@/components/profiles/facts-editor";
 import { RosterEditor } from "@/components/profiles/roster-editor";
 import { parsePhones } from "@/lib/forms";
 import { errMsg } from "@/lib/run-status";
@@ -136,6 +137,8 @@ export default function ProfileDetailPage() {
       </Card>
 
       <RosterEditor profile={profile} />
+
+      <FactsEditor profile={profile} />
     </div>
   );
 }

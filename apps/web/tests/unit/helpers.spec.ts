@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { isMonth, parseLines, parsePhones, toIntOrNull, toMonth } from "@/lib/forms";
+import { isMonth, metricLooksValid, parseLines, parsePhones, toIntOrNull, toMonth } from "@/lib/forms";
+import { factDraftValid } from "@/components/profiles/facts-editor";
 import {
   PROGRESS_STEPS, activeStep, errorText, matchesQuery, runHref, statusTone,
 } from "@/lib/run-status";
@@ -67,5 +68,19 @@ describe("roster and preview helpers", () => {
   it("formats ranges with words, not dashes", () => {
     expect(formatRange("2020-01", null)).toBe("Jan 2020 to Present");
     expect(formatRange("2016-03", "2019-12")).toBe("Mar 2016 to Dec 2019");
+  });
+});
+
+describe("fact bank form", () => {
+  it("accepts the metric values the API accepts and rejects the rest", () => {
+    for (const v of ["40", "1.2", "2M", "$2M", "1,200", "12 users", " 40% "]) expect(metricLooksValid(v)).toBe(true);
+    for (const v of ["", "abc", "4-5", "40%%", "%"]) expect(metricLooksValid(v)).toBe(false);
+  });
+  it("needs a claim, and a number for metrics only", () => {
+    const base = { kind: "metric" as const, claimText: "Cut churn by 40%", metricValue: "40", metricUnit: "%", context: "", employer: "" };
+    expect(factDraftValid(base)).toBe(true);
+    expect(factDraftValid({ ...base, metricValue: "" })).toBe(false);
+    expect(factDraftValid({ ...base, claimText: "  " })).toBe(false);
+    expect(factDraftValid({ ...base, kind: "skill" as never, metricValue: "" })).toBe(true);
   });
 });

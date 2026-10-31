@@ -62,3 +62,9 @@ export function factsForPrompt(facts: FactBankEntry[], strict: boolean): string 
     .map((f) => `- ${f.value}${f.verified ? '' : ' (unverified)'}`)
     .join('\n');
 }
+
+/** True when a metric's value can be matched against numbers in the résumé ("40", "1.2", "$2M"). */
+export function isParsableMetric(value: string | null | undefined): boolean {
+  const mv = (value ?? '').trim().replace(/^\$/, '').replace(/,/g, '');
+  return /^\d+(?:\.\d+)?\s*(?:[a-zA-Z]+|%)?$/.test(mv);
+}
