@@ -1,11 +1,8 @@
 // packages/rules/src/fact-bank.ts
-// Fact Bank matching used by R20.
+// Fact Bank matching used by the FACTS check.
 
-import {
-  FactBankEntry,
-  NumericToken,
-} from './types';
-import { canonicalMagnitude } from './util/text';
+import type { FactBankEntry } from './types';
+import { canonicalMagnitude, type NumericToken } from './util/text';
 
 export interface FactMatch {
   token: NumericToken;

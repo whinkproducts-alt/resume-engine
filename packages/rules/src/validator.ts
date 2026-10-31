@@ -1,5 +1,5 @@
 // packages/rules/src/validator.ts
-// Deterministic rule executor. Runs R1..R20, partitions flags, decides retry.
+// Deterministic rule executor. Runs R1..R20 and FACTS, partitions flags, decides retry.
 
 import {
   Rule,
@@ -39,7 +39,6 @@ export class RuleValidator {
     const fullCtx: RuleContext = {
       ...ctx,
       config: this.config,
-      targetRole: ctx.targetRole || ctx.resume.meta.targetRole || '',
       fileName: ctx.fileName || ctx.resume.meta.fileName || '',
       attempt: ctx.attempt ?? 1,
     };

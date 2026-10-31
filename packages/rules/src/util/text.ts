@@ -1,5 +1,5 @@
 // packages/rules/src/util/text.ts
-// Tokenising, verb extraction, and numeric-token scanning.
+// Tokenising, verb extraction, numeric-token scanning and prose helpers.
 
 /* ------------------------------ R2 tokenising ------------------------------ */
 
@@ -13,10 +13,10 @@ export function tokenize(input: string): string[] {
 }
 
 /**
- * Overlap coefficient (intersection / smaller-set-size).
- * Chosen over Jaccard so that "Data Scientist" vs "Lead Data Scientist"
- * scores 1.0 once stop words are removed, which is the intent of the
- * 70% close-variant rule.
+ * Overlap coefficient (intersection / smaller-set-size) over tokens with stop
+ * words removed. Chosen over Jaccard so that "Data Scientist" against
+ * "Lead Data Scientist" scores 1.0, which is the intent of the 70%
+ * close-variant rule ("ignoring stop words like Senior, Lead").
  */
 export function tokenOverlap(
   a: string,
@@ -41,6 +41,31 @@ export function tokenOverlap(
   };
 }
 
+/** Jaccard similarity of two token sets (used by R19 near-duplicate check). */
+export function jaccard(a: string, b: string): number {
+  const sa = new Set(tokenize(a));
+  const sb = new Set(tokenize(b));
+  if (sa.size === 0 || sb.size === 0) return 0;
+  let inter = 0;
+  for (const t of sa) if (sb.has(t)) inter++;
+  return inter / (sa.size + sb.size - inter);
+}
+
+/** Lower-cases, strips punctuation, collapses whitespace. */
+export function normalizeText(s: string): string {
+  return String(s ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Collapses case and whitespace only (for comparing names and labels). */
+export function looseEqual(a: string | null | undefined, b: string | null | undefined): boolean {
+  const n = (s: string | null | undefined) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  return n(a) === n(b);
+}
+
 /* ---------------------------- R10 verb extraction --------------------------- */
 
 const IRREGULAR_PAST: Record<string, string> = {
@@ -57,10 +82,10 @@ const IRREGULAR_PAST: Record<string, string> = {
 
 /** First token of a bullet, lower-cased, de-punctuated, de-inflected. */
 export function extractLeadingVerb(bullet: string): string | null {
-  const tokens = tokenize(bullet);
-  if (tokens.length === 0) return null;
-  const raw = tokens[0];
-  if (IRREGULAR_PAST[raw]) return IRREGULAR_PAST[raw];
+  const raw = tokenize(bullet)[0];
+  if (!raw) return null;
+  const irregular = IRREGULAR_PAST[raw];
+  if (irregular) return irregular;
   if (raw.length > 4 && raw.endsWith('ing')) return raw.slice(0, -3);
   if (raw.length > 3 && raw.endsWith('ed')) return raw.slice(0, -2);
   if (raw.length > 3 && raw.endsWith('s') && !raw.endsWith('ss')) {
@@ -69,7 +94,7 @@ export function extractLeadingVerb(bullet: string): string | null {
   return raw;
 }
 
-/* --------------------------- R20 numeric scanning --------------------------- */
+/* ------------------------------ numeric scanning ---------------------------- */
 
 export interface NumericToken {
   raw: string;
@@ -94,21 +119,22 @@ export function scanNumericTokens(text: string): NumericToken[] {
   NUMERIC_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = NUMERIC_RE.exec(text)) !== null) {
-    const digits = m[1].replace(/,/g, '');
+    const digits = (m[1] ?? '').replace(/,/g, '');
     const numeric = Number(digits);
-    if (!Number.isFinite(numeric)) continue;
-    let unit = m[2] ? m[2].toLowerCase().replace(/\b\b/g, '') : null;
-    if (unit) {
-      unit = unit.replace(/[.,;:]$/, '');
-      unit = UNIT_ALIASES[unit] ?? unit;
+    if (Number.isFinite(numeric)) {
+      let unit: string | null = m[2] ? m[2].toLowerCase() : null;
+      if (unit) {
+        unit = unit.replace(/[.,;:]$/, '');
+        unit = UNIT_ALIASES[unit] ?? unit;
+      }
+      out.push({ raw: m[0].trim(), numeric, unit, index: m.index });
     }
-    out.push({ raw: m[0].trim(), numeric, unit, index: m.index });
     if (m.index === NUMERIC_RE.lastIndex) NUMERIC_RE.lastIndex++; // guard
   }
   return out;
 }
 
-/** Expands 'k' / 'm' / 'bn' / '%' suffixes into a canonical magnitude. */
+/** Expands 'k' / 'm' / 'bn' suffixes into a canonical magnitude. */
 export function canonicalMagnitude(t: NumericToken): number {
   switch (t.unit) {
     case 'k': return t.numeric * 1_000;
@@ -118,8 +144,22 @@ export function canonicalMagnitude(t: NumericToken): number {
   }
 }
 
+/** True for a bare four-digit year with no unit (a date mention, not a metric). */
+export function isBareYear(t: NumericToken): boolean {
+  return t.unit == null && /^\d{4}$/.test(t.raw) && t.numeric >= 1950 && t.numeric <= 2100;
+}
+
+/* --------------------------------- prose ------------------------------------ */
+
 export function wordCount(text: string): number {
   return String(text ?? '').trim().split(/\s+/).filter(Boolean).length;
+}
+
+export function splitSentences(text: string): string[] {
+  return String(text ?? '')
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 export function containsPhrase(haystack: string, phrase: string): boolean {

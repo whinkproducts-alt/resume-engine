@@ -1,389 +1,404 @@
 // packages/renderer/src/docx-renderer.ts
-// Stage 7 — DOCX rendering via the `docx` npm package.
-// Layout mirrors Section 6 of the master spec: single column, no tables,
-// no images, no text boxes (so R13 passes by construction).
+// Stage 7: deterministic DOCX rendering with the `docx` npm package.
 //
-//   [NAME]                         16pt bold, centered
-//   [contact line]                  9pt, centered, ' • ' separated
-//   [HEADLINE]                     10pt italic, centered
-//   ── SUMMARY ───────────────────────────────────────────────
-//   ── CORE SKILLS ───────────────────────────────────────────
-//   ── PROFESSIONAL EXPERIENCE ───────────────────────────────
-//   ── EDUCATION ─────────────────────────────────────────────
-//   ── PROJECTS / CERTIFICATIONS / LANGUAGES (conditional) ───
+// Layout contract: docs/source-parts/Resume_Engine_Spec_v3.1.txt, Section 6
+// ("DOCX layout spec", taken from the working build script) and §6 of
+// docs/01-SPEC-v3.md. Single column, Calibri throughout, no tables.
+//
+//   Page ........ US Letter 12240 x 15840 DXA
+//   Margins ..... top 720, right 1008, bottom 720, left 1008 DXA
+//   Name ........ 20pt bold, 1F3864, centered
+//   Contact ..... 10pt, centered, " | " separated
+//   Divider ..... paragraph bottom border, single, size 8, 2E74B5
+//   Headline .... line 1: 11pt bold caps centered; line 2: 10pt italic centered
+//   Headings .... 11pt bold 1F3864, bottom border size 6 2E74B5, before 180 after 80
+//   Body ........ 10pt
+//   Company ..... company bold 10.5pt, then " | dates" regular 10pt
+//   Role title .. 10pt italic
+//   Flagship .... bold, "▸" from the numbering config (never typed), indent 360/360
+//   Bullet ...... "•" from the numbering config, indent 360/360
+//   Keywords .... 9pt, one paragraph
+//
+// Agency white-label: BrandingConfig.primaryColor replaces 1F3864, the logo
+// sits top right, and footerText becomes the page footer.
 
 import {
   AlignmentType,
   BorderStyle,
   Document,
-  HeadingLevel,
+  Footer,
+  HorizontalPositionAlign,
+  HorizontalPositionRelativeFrom,
+  ImageRun,
+  LevelFormat,
   Packer,
   Paragraph,
-  TabStopType,
   TextRun,
-  convertInchesToTwip,
-  LevelFormat,
+  TextWrappingType,
+  VerticalPositionRelativeFrom,
 } from 'docx';
-import type {
-  EducationItem,
-  ExperienceItem,
-  RenderNode,
-  ResumeDoc,
-} from '@resume-engine/rules';
+import type { ResumeDoc } from '@resume-engine/rules';
 
-export const PAGE_WIDTH_TWIPS = 12240;      // US Letter 8.5"
-export const PAGE_HEIGHT_TWIPS = 15840;     // US Letter 11"
-export const MARGIN_TWIPS = convertInchesToTwip(0.5);
-export const CONTENT_WIDTH_TWIPS = PAGE_WIDTH_TWIPS - MARGIN_TWIPS * 2;
+export const PAGE_WIDTH_DXA = 12240;
+export const PAGE_HEIGHT_DXA = 15840;
+export const MARGINS_DXA = { top: 720, right: 1008, bottom: 720, left: 1008 } as const;
+
+export const DEFAULT_ACCENT = '1F3864';
+export const RULE_COLOR = '2E74B5';
 
 const FONT = 'Calibri';
-const SIZE = { name: 32, contact: 18, headline: 20, heading: 20, body: 20, meta: 18 };
-const COLOR = { ink: '1A1A1A', muted: '4A4A4A', rule: 'BFBFBF', accent: '1F3864' };
+/** docx sizes are half points. */
+const SIZE = {
+  name: 40,        // 20pt
+  heading: 22,     // 11pt
+  headline1: 22,   // 11pt
+  headline2: 20,   // 10pt
+  body: 20,        // 10pt
+  company: 21,     // 10.5pt
+  keywords: 18,    // 9pt
+};
+
+const FLAGSHIP_REF = 'resume-flagship';
+const BULLET_REF = 'resume-bullet';
+
+export interface BrandingOptions {
+  /** Hex colour, with or without '#'. Replaces 1F3864. */
+  primaryColor?: string | null;
+  /** Shown as the page footer. */
+  footerText?: string | null;
+  logo?: {
+    data: Buffer | Uint8Array;
+    type: 'png' | 'jpg' | 'gif' | 'bmp';
+    /** Pixels. */
+    width: number;
+    height: number;
+  } | null;
+}
+
+export interface RenderOptions {
+  /** Provided only when the run owner is on the AGENCY plan. */
+  branding?: BrandingOptions | null;
+}
 
 export interface RenderedDocx {
   buffer: Buffer;
-  /** Node inventory consumed by R13 on the post-render validation pass. */
-  nodes: RenderNode[];
 }
 
-const SPACING = {
-  sectionBefore: 160,
-  sectionAfter: 60,
-  itemAfter: 40,
-  bulletAfter: 30,
-};
+function accentFor(branding?: BrandingOptions | null): string {
+  const c = branding?.primaryColor?.trim().replace(/^#/, '');
+  return c && /^[0-9a-fA-F]{6}$/.test(c) ? c.toUpperCase() : DEFAULT_ACCENT;
+}
 
-function sectionHeading(text: string): Paragraph {
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function fmtMonth(v?: string | null): string {
+  if (!v) return '';
+  const m = /^(\d{4})-(\d{2})/.exec(v);
+  if (!m) return v;
+  const name = MONTHS[Number(m[2]) - 1];
+  return name ? `${name} ${m[1]}` : v;
+}
+
+/** "Jan 2020 to Present". Words, not dashes, so the prose style rule holds. */
+export function formatDateRange(start?: string | null, end?: string | null): string {
+  const left = fmtMonth(start);
+  const right = !end || /^(present|current|now)$/i.test(end) ? 'Present' : fmtMonth(end);
+  return [left, right].filter(Boolean).join(' to ');
+}
+
+/* --------------------------------- builders -------------------------------- */
+
+const run = (text: string, o: {
+  size?: number; bold?: boolean; italics?: boolean; color?: string; allCaps?: boolean;
+} = {}) => new TextRun({
+  text,
+  font: FONT,
+  size: o.size ?? SIZE.body,
+  ...(o.bold ? { bold: true } : {}),
+  ...(o.italics ? { italics: true } : {}),
+  ...(o.color ? { color: o.color } : {}),
+  ...(o.allCaps ? { allCaps: true } : {}),
+});
+
+function heading(text: string, accent: string): Paragraph {
   return new Paragraph({
-    spacing: { before: SPACING.sectionBefore, after: SPACING.sectionAfter },
+    spacing: { before: 180, after: 80 },
     border: {
-      bottom: { style: BorderStyle.SINGLE, size: 4, color: COLOR.rule, space: 2 },
+      bottom: { style: BorderStyle.SINGLE, size: 6, color: RULE_COLOR, space: 1 },
     },
-    children: [
-      new TextRun({
-        text: text.toUpperCase(),
-        bold: true,
-        size: SIZE.heading,
-        color: COLOR.accent,
-        font: FONT,
-        characterSpacing: 20,
-      }),
-    ],
+    children: [run(text, { size: SIZE.heading, bold: true, color: accent })],
+  });
+}
+
+function divider(): Paragraph {
+  return new Paragraph({
+    spacing: { before: 0, after: 60 },
+    border: {
+      bottom: { style: BorderStyle.SINGLE, size: 8, color: RULE_COLOR, space: 1 },
+    },
+    children: [],
+  });
+}
+
+const para = (children: TextRun[], after = 40) =>
+  new Paragraph({ spacing: { after }, children });
+
+function flagship(text: string): Paragraph {
+  return new Paragraph({
+    numbering: { reference: FLAGSHIP_REF, level: 0 },
+    spacing: { before: 20, after: 20 },
+    children: [run(text, { bold: true })],
   });
 }
 
 function bullet(text: string): Paragraph {
   return new Paragraph({
-    bullet: { level: 0 },
-    spacing: { after: SPACING.bulletAfter },
-    children: [new TextRun({ text, size: SIZE.body, font: FONT, color: COLOR.ink })],
+    numbering: { reference: BULLET_REF, level: 0 },
+    spacing: { after: 20 },
+    children: [run(text)],
   });
 }
 
-function body(text: string, opts: { italic?: boolean; color?: string } = {}): Paragraph {
+function logoParagraph(branding: BrandingOptions): Paragraph | null {
+  const logo = branding.logo;
+  if (!logo) return null;
   return new Paragraph({
-    spacing: { after: SPACING.itemAfter },
+    spacing: { after: 0 },
     children: [
-      new TextRun({
-        text,
-        size: SIZE.body,
-        font: FONT,
-        italics: opts.italic,
-        color: opts.color ?? COLOR.ink,
+      new ImageRun({
+        type: logo.type,
+        data: logo.data,
+        transformation: { width: logo.width, height: logo.height },
+        floating: {
+          horizontalPosition: {
+            relative: HorizontalPositionRelativeFrom.PAGE,
+            align: HorizontalPositionAlign.RIGHT,
+          },
+          verticalPosition: {
+            relative: VerticalPositionRelativeFrom.PAGE,
+            offset: 360 * 635, // 0.25 inch, in EMU
+          },
+          wrap: { type: TextWrappingType.NONE },
+        },
       }),
     ],
   });
 }
 
-/** Left/right tab split used for "Title — Company <tab> Dates". */
-function tabbedLine(left: TextRun[], right: string): Paragraph {
-  return new Paragraph({
-    tabStops: [{ type: TabStopType.RIGHT, position: CONTENT_WIDTH_TWIPS }],
-    spacing: { before: 60, after: 20 },
-    children: [
-      ...left,
-      new TextRun({ text: '\t', size: SIZE.body, font: FONT }),
-      new TextRun({
-        text: right, size: SIZE.meta, font: FONT,
-        color: COLOR.muted, italics: true,
-      }),
-    ],
-  });
-}
+/* --------------------------------- sections -------------------------------- */
 
-function formatRange(start?: string, end?: string | null, current?: boolean): string {
-  const fmt = (v?: string | null) => {
-    if (!v) return '';
-    const m = /^(\d{4})-(\d{2})$/.exec(v);
-    if (!m) return v;
-    const months = ['Jan','Feb','Mar','Apr','May','Jun',
-                    'Jul','Aug','Sep','Oct','Nov','Dec'];
-    return `${months[Number(m[2]) - 1]} ${m[1]}`;
-  };
-  const left = fmt(start);
-  const right = current || !end ? 'Present' : fmt(end);
-  if (!left && !right) return '';
-  return `${left} – ${right}`.trim();
-}
-
-/* ------------------------------ Section builders --------------------------- */
-
-function headerSection(doc: ResumeDoc, nodes: RenderNode[]): Paragraph[] {
+function headerBlock(doc: ResumeDoc, accent: string, branding?: BrandingOptions | null): Paragraph[] {
+  const h = doc.header;
   const out: Paragraph[] = [];
+
+  const logo = branding ? logoParagraph(branding) : null;
+  if (logo) out.push(logo);
 
   out.push(new Paragraph({
     alignment: AlignmentType.CENTER,
     spacing: { after: 20 },
-    children: [new TextRun({
-      text: doc.contact.name.toUpperCase(),
-      bold: true, size: SIZE.name, font: FONT,
-      color: COLOR.ink, characterSpacing: 30,
-    })],
+    children: [run(h.fullName, { size: SIZE.name, bold: true, color: accent })],
   }));
-  nodes.push({ type: 'heading', path: 'contact.name' });
 
-  const contactBits = [
-    doc.contact.email,
-    doc.contact.phone,
-    doc.contact.location,
-    ...(doc.contact.links ?? []),
-  ].filter((v): v is string => Boolean(v && v.trim()));
+  const contact = [h.city, ...h.phones, h.email, h.linkedIn]
+    .filter((v): v is string => Boolean(v && v.trim()));
+  out.push(new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { after: 40 },
+    children: [run(contact.join(' | '))],
+  }));
 
-  if (contactBits.length) {
+  out.push(divider());
+
+  const [role, industry] = doc.headline;
+  if (role?.trim()) {
     out.push(new Paragraph({
       alignment: AlignmentType.CENTER,
       spacing: { after: 20 },
-      children: [new TextRun({
-        text: contactBits.join('  •  '),
-        size: SIZE.contact, font: FONT, color: COLOR.muted,
-      })],
+      children: [run(role.trim(), { size: SIZE.headline1, bold: true, allCaps: true })],
     }));
-    nodes.push({ type: 'paragraph', path: 'contact' });
   }
-
-  if (doc.headline?.trim()) {
+  if (industry?.trim()) {
     out.push(new Paragraph({
       alignment: AlignmentType.CENTER,
       spacing: { after: 40 },
-      children: [new TextRun({
-        text: doc.headline.trim(),
-        italics: true, size: SIZE.headline, font: FONT, color: COLOR.accent,
-      })],
+      children: [run(industry.trim(), { size: SIZE.headline2, italics: true })],
     }));
-    nodes.push({ type: 'paragraph', path: 'headline' });
-  }
-
-  return out;
-}
-
-function summarySection(doc: ResumeDoc, nodes: RenderNode[]): Paragraph[] {
-  if (!doc.summary?.trim()) return [];
-  nodes.push({ type: 'heading', path: 'summary' });
-  nodes.push({ type: 'paragraph', path: 'summary' });
-  return [sectionHeading('Summary'), body(doc.summary.trim())];
-}
-
-function skillsSection(doc: ResumeDoc, nodes: RenderNode[]): Paragraph[] {
-  if (!doc.skills?.length) return [];
-  const out: Paragraph[] = [sectionHeading('Core Skills')];
-  nodes.push({ type: 'heading', path: 'skills' });
-
-  for (const [i, group] of doc.skills.entries()) {
-    const items = (group.items ?? []).filter(Boolean);
-    if (!items.length) continue;
-
-    if (group.category) {
-      out.push(new Paragraph({
-        spacing: { after: SPACING.bulletAfter },
-        children: [
-          new TextRun({
-            text: `${group.category}: `, bold: true,
-            size: SIZE.body, font: FONT, color: COLOR.ink,
-          }),
-          new TextRun({ text: items.join(', '), size: SIZE.body, font: FONT, color: COLOR.ink }),
-        ],
-      }));
-    } else {
-      out.push(new Paragraph({
-        spacing: { after: SPACING.bulletAfter },
-        children: [new TextRun({
-          text: items.join('  •  '), size: SIZE.body, font: FONT, color: COLOR.ink,
-        })],
-      }));
-    }
-    nodes.push({ type: 'paragraph', path: `skills[${i}]` });
   }
   return out;
 }
 
-function experienceSection(doc: ResumeDoc, nodes: RenderNode[]): Paragraph[] {
-  if (!doc.experience?.length) return [];
-  const out: Paragraph[] = [sectionHeading('Professional Experience')];
-  nodes.push({ type: 'heading', path: 'experience' });
-
-  doc.experience.forEach((exp: ExperienceItem, i: number) => {
-    out.push(tabbedLine([
-      new TextRun({ text: exp.title, bold: true, size: SIZE.body, font: FONT, color: COLOR.ink }),
-      new TextRun({
-        text: exp.company ? `  —  ${exp.company}` : '',
-        size: SIZE.body, font: FONT, color: COLOR.ink,
-      }),
-      ...(exp.location
-        ? [new TextRun({
-            text: `  ·  ${exp.location}`,
-            size: SIZE.meta, font: FONT, color: COLOR.muted,
-          })]
-        : []),
-    ], formatRange(exp.startDate, exp.endDate, exp.current)));
-    nodes.push({ type: 'paragraph', path: `experience[${i}].header` });
-
-    (exp.bullets ?? []).forEach((b, j) => {
-      const text = b.trim();
-      if (!text) return;
-      out.push(bullet(text));
-      nodes.push({ type: 'bullet', path: `experience[${i}].bullets[${j}]` });
-    });
-  });
-
-  return out;
+function summaryBlock(doc: ResumeDoc, accent: string): Paragraph[] {
+  const paras = doc.summary.map((s) => s.trim()).filter(Boolean);
+  if (!paras.length) return [];
+  return [heading('Professional Summary', accent), ...paras.map((p) => para([run(p)]))];
 }
 
-function educationSection(doc: ResumeDoc, nodes: RenderNode[]): Paragraph[] {
-  if (!doc.education?.length) return [];
-  const out: Paragraph[] = [sectionHeading('Education')];
-  nodes.push({ type: 'heading', path: 'education' });
-
-  doc.education.forEach((edu: EducationItem, i: number) => {
-    const degree = [edu.degree, edu.field].filter(Boolean).join(', ');
-    out.push(tabbedLine([
-      new TextRun({ text: degree || edu.institution, bold: true,
-        size: SIZE.body, font: FONT, color: COLOR.ink }),
-      ...(degree && edu.institution
-        ? [new TextRun({ text: `  —  ${edu.institution}`, size: SIZE.body,
-            font: FONT, color: COLOR.ink })]
-        : []),
-    ], formatRange(edu.startDate, edu.endDate)));
-    nodes.push({ type: 'paragraph', path: `education[${i}].header` });
-
-    if (edu.grade?.trim()) {
-      out.push(new Paragraph({
-        spacing: { after: SPACING.itemAfter },
-        children: [new TextRun({
-          text: edu.grade.trim(), size: SIZE.meta, font: FONT, color: COLOR.muted,
-        })],
-      }));
-      nodes.push({ type: 'paragraph', path: `education[${i}].grade` });
-    }
-  });
-
-  return out;
-}
-
-function projectsSection(doc: ResumeDoc, nodes: RenderNode[]): Paragraph[] {
-  if (!doc.projects?.length) return [];
-  const out: Paragraph[] = [sectionHeading('Selected Projects')];
-  nodes.push({ type: 'heading', path: 'projects' });
-
-  doc.projects.forEach((p, i) => {
-    out.push(tabbedLine([
-      new TextRun({ text: p.name, bold: true, size: SIZE.body, font: FONT, color: COLOR.ink }),
-    ], p.link ?? ''));
-    nodes.push({ type: 'paragraph', path: `projects[${i}].header` });
-
-    if (p.description?.trim()) {
-      out.push(body(p.description.trim()));
-      nodes.push({ type: 'paragraph', path: `projects[${i}].description` });
-    }
-    (p.bullets ?? []).forEach((b, j) => {
-      if (!b.trim()) return;
-      out.push(bullet(b.trim()));
-      nodes.push({ type: 'bullet', path: `projects[${i}].bullets[${j}]` });
-    });
-  });
-
-  return out;
-}
-
-function inlineListSection(
-  title: string,
-  items: string[] | undefined,
-  path: string,
-  nodes: RenderNode[],
-): Paragraph[] {
-  const clean = (items ?? []).map((s) => s.trim()).filter(Boolean);
-  if (!clean.length) return [];
-  nodes.push({ type: 'heading', path });
-  nodes.push({ type: 'paragraph', path });
+function competenciesBlock(doc: ResumeDoc, accent: string): Paragraph[] {
+  if (!doc.competencies.length) return [];
   return [
-    sectionHeading(title),
-    new Paragraph({
-      spacing: { after: SPACING.itemAfter },
-      children: [new TextRun({
-        text: clean.join('  •  '), size: SIZE.body, font: FONT, color: COLOR.ink,
-      })],
+    heading('Core Competencies', accent),
+    ...doc.competencies.map((c) => para([
+      run(`${c.label}: `, { bold: true }),
+      run(c.items.map((i) => i.trim()).filter(Boolean).join(', ')),
+    ], 30)),
+  ];
+}
+
+function experienceBlock(doc: ResumeDoc, accent: string): Paragraph[] {
+  if (!doc.experience.length) return [];
+  const out: Paragraph[] = [heading('Professional Experience', accent)];
+
+  for (const exp of doc.experience) {
+    const dates = formatDateRange(exp.startDate, exp.endDate);
+    out.push(new Paragraph({
+      keepNext: true,
+      spacing: { before: 100, after: 0 },
+      children: [
+        run(exp.company, { size: SIZE.company, bold: true }),
+        ...(dates ? [run(` | ${dates}`)] : []),
+      ],
+    }));
+    out.push(new Paragraph({
+      keepNext: true,
+      spacing: { after: 20 },
+      children: [run(exp.title, { italics: true })],
+    }));
+    if (exp.flagship.trim()) out.push(flagship(exp.flagship.trim()));
+    for (const b of exp.bullets) {
+      if (b.trim()) out.push(bullet(b.trim()));
+    }
+  }
+  return out;
+}
+
+function educationBlock(doc: ResumeDoc, accent: string): Paragraph[] {
+  if (!doc.education.length) return [];
+  return [
+    heading('Education', accent),
+    ...doc.education.map((e) => {
+      const degree = [e.degree, e.field].filter(Boolean).join(', ');
+      const years = [e.startYear, e.endYear].filter((y) => y != null).join(' to ');
+      return para([run([degree, e.institution, years].filter(Boolean).join(' | '))], 30);
     }),
   ];
 }
 
-/* --------------------------------- Renderer -------------------------------- */
+function certificationsBlock(doc: ResumeDoc, accent: string): Paragraph[] {
+  if (!doc.certifications.length) return [];
+  return [
+    heading('Certifications', accent),
+    ...doc.certifications.map((c) =>
+      para([run([c.name, c.issuer, c.year].filter(Boolean).join(' | '))], 30)),
+  ];
+}
 
-export async function renderResumeDocx(doc: ResumeDoc): Promise<RenderedDocx> {
-  const nodes: RenderNode[] = [];
+function keywordsBlock(doc: ResumeDoc, accent: string): Paragraph[] {
+  const terms = doc.keywords.map((k) => k.trim()).filter(Boolean);
+  if (!terms.length) return [];
+  return [
+    heading('Keywords', accent),
+    para([run(terms.join(', '), { size: SIZE.keywords })]),
+  ];
+}
+
+function targetsBlock(doc: ResumeDoc, accent: string): Paragraph[] {
+  if (!doc.targetCompanies.length) return [];
+  return [
+    heading('Target companies and similar roles', accent),
+    ...doc.targetCompanies.map((t) =>
+      para([run(`${t.name} | ${t.department} | ${t.exampleRole}`)], 20)),
+  ];
+}
+
+/* --------------------------------- renderer -------------------------------- */
+
+export async function renderResumeDocx(
+  doc: ResumeDoc,
+  opts: RenderOptions = {},
+): Promise<RenderedDocx> {
+  const branding = opts.branding ?? null;
+  const accent = accentFor(branding);
 
   const children: Paragraph[] = [
-    ...headerSection(doc, nodes),
-    ...summarySection(doc, nodes),
-    ...skillsSection(doc, nodes),
-    ...experienceSection(doc, nodes),
-    ...educationSection(doc, nodes),
-    ...projectsSection(doc, nodes),
-    ...inlineListSection('Certifications', doc.certifications, 'certifications', nodes),
-    ...inlineListSection('Languages', doc.languages, 'languages', nodes),
+    ...headerBlock(doc, accent, branding),
+    ...summaryBlock(doc, accent),
+    ...competenciesBlock(doc, accent),
+    ...experienceBlock(doc, accent),
+    ...educationBlock(doc, accent),
+    ...certificationsBlock(doc, accent),
+    ...keywordsBlock(doc, accent),
+    ...targetsBlock(doc, accent),
   ];
+
+  const footerText = branding?.footerText?.trim();
 
   const document = new Document({
     creator: 'Resume Engine',
-    title: `${doc.contact.name} — ${doc.meta.targetRole}`,
+    title: `${doc.header.fullName} ${doc.meta.targetRole}`,
     description: `Generated for run ${doc.meta.runId}`,
     styles: {
-      default: {
-        document: {
-          run: { font: FONT, size: SIZE.body, color: COLOR.ink },
-        },
-      },
+      default: { document: { run: { font: FONT, size: SIZE.body } } },
     },
     numbering: {
-      config: [{
-        reference: 'resume-bullets',
-        levels: [{
-          level: 0,
-          format: LevelFormat.BULLET,
-          text: '•',
-          alignment: AlignmentType.LEFT,
-          style: { paragraph: { indent: { left: convertInchesToTwip(0.22),
-                                          hanging: convertInchesToTwip(0.16) } } },
-        }],
-      }],
+      config: [
+        {
+          reference: FLAGSHIP_REF,
+          levels: [{
+            level: 0,
+            format: LevelFormat.BULLET,
+            text: '▸',
+            alignment: AlignmentType.LEFT,
+            style: {
+              paragraph: { indent: { left: 360, hanging: 360 } },
+              run: { bold: true },
+            },
+          }],
+        },
+        {
+          reference: BULLET_REF,
+          levels: [{
+            level: 0,
+            format: LevelFormat.BULLET,
+            text: '•',
+            alignment: AlignmentType.LEFT,
+            style: { paragraph: { indent: { left: 360, hanging: 360 } } },
+          }],
+        },
+      ],
     },
     sections: [{
       properties: {
         page: {
-          size: { width: PAGE_WIDTH_TWIPS, height: PAGE_HEIGHT_TWIPS },
-          margin: {
-            top: MARGIN_TWIPS, right: MARGIN_TWIPS,
-            bottom: MARGIN_TWIPS, left: MARGIN_TWIPS,
-          },
+          size: { width: PAGE_WIDTH_DXA, height: PAGE_HEIGHT_DXA },
+          margin: { ...MARGINS_DXA },
         },
       },
+      ...(footerText
+        ? {
+            footers: {
+              default: new Footer({
+                children: [new Paragraph({
+                  alignment: AlignmentType.CENTER,
+                  children: [run(footerText, { size: SIZE.keywords })],
+                })],
+              }),
+            },
+          }
+        : {}),
       children,
     }],
   });
 
   const buffer = await Packer.toBuffer(document);
-  return { buffer, nodes };
+  return { buffer };
 }
 
 /** Convenience: renders to a Buffer only. */
-export async function renderResumeDocxBuffer(doc: ResumeDoc): Promise<Buffer> {
-  return (await renderResumeDocx(doc)).buffer;
+export async function renderResumeDocxBuffer(
+  doc: ResumeDoc,
+  opts: RenderOptions = {},
+): Promise<Buffer> {
+  return (await renderResumeDocx(doc, opts)).buffer;
 }

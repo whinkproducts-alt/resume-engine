@@ -1,12 +1,27 @@
 {
   "name": "@resume-engine/renderer",
   "version": "1.0.0",
-  "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "dependencies": {
     "docx": "^8.5.0",
     "@resume-engine/rules": "workspace:*"
   },
-  "devDependencies": { "typescript": "^5.5.4" }
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "@types/node": "^22.5.0",
+    "vitest": "^2.0.5",
+    "jszip": "^3.10.1"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  }
 }

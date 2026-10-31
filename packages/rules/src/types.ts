@@ -1,15 +1,20 @@
 // packages/rules/src/types.ts
-// Shared domain types for the deterministic Rule Validator (Stage 6).
+// Domain types for the deterministic Rule Validator (Stage 6).
+//
+// Rule semantics follow the authoritative R1..R20 table in
+// docs/source-parts/Resume_Engine_Spec_v3.1.txt (Section 4). The resume model
+// mirrors the shape of Run.outputJson and the Prisma Profile / RoleEntry /
+// Education / Certification models (the schema is the source of truth).
 
 export type Severity = 'error' | 'warn' | 'info';
 
 /** A single finding emitted by a rule. */
 export interface ValidationFlag {
-  ruleId: string;                 // 'R1' .. 'R20'
-  code: string;                   // machine-readable, e.g. 'FACT_BANK_MISS'
+  ruleId: string;                 // 'R1' .. 'R20', or 'FACTS'
+  code: string;                   // machine-readable, e.g. 'HEADER_CHANGED'
   severity: Severity;
-  blocking: boolean;              // true => run must retry (if budget left)
-  message: string;                // human-readable, shown in /runs/:id/validation
+  blocking: boolean;              // true => section must be regenerated
+  message: string;                // human-readable
   path?: string;                  // e.g. 'experience[2].bullets[0]'
   meta?: Record<string, unknown>;
 }
@@ -18,16 +23,18 @@ export type Flag = ValidationFlag;
 
 /* ------------------------------- Resume model ------------------------------ */
 
-export interface ContactBlock {
-  name: string;
+/** R1: the header block is copied byte-for-byte from the profile. */
+export interface ResumeHeader {
+  fullName: string;
+  city: string;
+  phones: string[];
   email: string;
-  phone?: string;
-  location?: string;
-  links?: string[];
+  linkedIn?: string | null;
 }
 
-export interface SkillGroup {
-  category?: string;
+/** R5: Core Competencies subsection. */
+export interface CompetencyGroup {
+  label: string;
   items: string[];
 }
 
@@ -35,30 +42,33 @@ export interface ExperienceItem {
   id: string;
   company: string;
   title: string;
-  location?: string;
+  location?: string | null;
   startDate: string;              // 'YYYY-MM'
   endDate?: string | null;        // null / undefined => current role
-  current?: boolean;
+  /** R8: the single bold flagship line that opens the role. */
+  flagship: string;
   bullets: string[];
 }
 
 export interface EducationItem {
-  id: string;
   institution: string;
   degree: string;
-  field?: string;
-  location?: string;
-  startDate?: string;             // 'YYYY-MM' or 'YYYY'
-  endDate?: string;
-  grade?: string;
+  field?: string | null;
+  startYear: number;
+  endYear?: number | null;
 }
 
-export interface ProjectItem {
-  id: string;
+export interface CertificationItem {
   name: string;
-  description?: string;
-  bullets?: string[];
-  link?: string;
+  issuer?: string | null;
+  year?: number | null;
+}
+
+/** R16: "Target companies and similar roles". */
+export interface TargetCompany {
+  name: string;
+  department: string;
+  exampleRole: string;
 }
 
 export interface ResumeMeta {
@@ -73,16 +83,65 @@ export interface ResumeMeta {
 
 export interface ResumeDoc {
   meta: ResumeMeta;
-  contact: ContactBlock;
-  headline?: string;
-  summary?: string;
-  skills: SkillGroup[];
+  header: ResumeHeader;
+  /** R3: exactly two lines, role line then industry line. */
+  headline: string[];
+  /** R4: four short paragraphs. */
+  summary: string[];
+  /** R5: six subsections in a fixed order. */
+  competencies: CompetencyGroup[];
   experience: ExperienceItem[];
   education: EducationItem[];
-  projects?: ProjectItem[];
-  certifications?: string[];
-  languages?: string[];
+  certifications: CertificationItem[];
+  /** R14 / R15: the keyword block. */
+  keywords: string[];
+  /** R16: exactly seven. */
+  targetCompanies: TargetCompany[];
 }
+
+/* ------------------------- Reference data for checks ------------------------ */
+
+export interface BaseRole {
+  company: string;
+  baseTitle: string;
+  startDate: string;              // 'YYYY-MM'
+  endDate?: string | null;
+  location?: string | null;
+  flagship?: string | null;
+  bullets: string[];
+}
+
+/** The profile roster plus the active base resume (R1, R6, R7, R12, R13, R15, R19). */
+export interface BaseSnapshot {
+  header: ResumeHeader;
+  roles: BaseRole[];
+  education: EducationItem[];
+  certifications: CertificationItem[];
+  /** The base resume's keyword block. */
+  keywords: string[];
+}
+
+/** What Stage 2 extracted from the job description (R2, R4, R6, R14). */
+export interface JdContext {
+  roleTitle: string;
+  keywords: string[];
+}
+
+/** The subset of UserSettings that changes rule behaviour. */
+export interface RuleToggles {
+  /** UserSettings.banHyphensInProse */
+  banHyphensInProse: boolean;
+  /** UserSettings.whinkGroupFraming (R17) */
+  whinkGroupFraming: boolean;
+  /** UserSettings.strictFactsMode: unverified numbers block the run. */
+  strictFactsMode: boolean;
+}
+
+export const DEFAULT_TOGGLES: RuleToggles = {
+  banHyphensInProse: true,
+  whinkGroupFraming: false,
+  strictFactsMode: true,
+};
 
 /* -------------------------------- Fact bank -------------------------------- */
 
@@ -90,6 +149,10 @@ export type FactKind =
   | 'metric' | 'date' | 'employer' | 'title'
   | 'education' | 'skill' | 'other';
 
+/**
+ * Engine-side view of a fact. The database model is Prisma's FactBankEntry
+ * (claimText, metricValue, metricUnit, ...); the worker maps one to the other.
+ */
 export interface FactBankEntry {
   id: string;
   kind: FactKind;
@@ -105,20 +168,9 @@ export interface FactBankEntry {
   sourceRunId?: string;
 }
 
-/* -------------------------- Renderer node inventory ------------------------- */
-
-/** Emitted by the DOCX renderer so R13 can prove no unsupported constructs. */
-export type RenderNodeType =
-  | 'paragraph' | 'heading' | 'bullet' | 'table' | 'image' | 'textbox' | 'shape';
-
-export interface RenderNode {
-  type: RenderNodeType;
-  path?: string;
-}
-
 /* ------------------------------ LLM judgement ------------------------------ */
 
-/** Supplied by Stage 5. Consumed only by R9 — never blocking. */
+/** Supplied by Stage 4/6. Consumed only by R9, which never blocks. */
 export interface LlmJudgement {
   bulletScores?: { path: string; score: number; rationale?: string }[];
   overallScore?: number;
@@ -128,80 +180,90 @@ export interface LlmJudgement {
 /* --------------------------------- Config ---------------------------------- */
 
 export interface RuleConfig {
-  /** R18 — authoritative regex from Victor's sign-off. */
+  /** R18: authoritative regex from Victor's sign-off. */
   filenamePattern: RegExp;
-  /** R2 — 70% token overlap, stop words ignored. */
+  /** R2: 70% token overlap, stop words ignored. */
   roleOverlapThreshold: number;
   roleStopWords: readonly string[];
-  /** R15 / Stage 8 — page overflow threshold. */
+  /** R3: headline line count. */
+  headlineLines: number;
+  /** R4: paragraph count. */
+  summaryParagraphs: number;
+  /** R5: the six subsection labels, in order. */
+  competencyLabels: readonly string[];
+  /** R11: minimum experience points per role (flagship plus bullets). */
+  minPointsPerRole: number;
+  /** R14: minimum distinct keyword terms. */
+  minKeywords: number;
+  /** R16: number of target companies. */
+  targetCompanyCount: number;
+  /** Stage 8 page budget (PAGE_OVERFLOW warn). */
   maxPages: number;
-  /** R6 — employment gap threshold in months. */
-  maxGapMonths: number;
-  /** R7 — bullets per role. */
-  bulletsPerRole: { min: number; max: number };
-  /** R8 — max characters per bullet. */
-  maxBulletChars: number;
-  /** R14 — total document word budget. */
-  maxTotalWords: number;
-  /** R16 — skills inventory bounds. */
-  skillsBounds: { min: number; max: number };
-  /** R20 — retry budget when a blocking failure occurs. */
+  /** Retry budget when a blocking failure occurs (Stage 6). */
   maxRetries: number;
-  /** R20 — Fact Bank policy. */
-  factBank: {
-    requireVerified: boolean;
-    /** If true, unmatched numerics are reported but not blocking. */
-    allowUnverifiedNumbers: boolean;
-  };
-  /** R9 — warn when an LLM bullet score falls below this. */
+  /** R9: warn when an LLM bullet score falls below this. */
   llmScoreFloor: number;
-  /** R11 — cliché / banned phrase list. */
-  bannedPhrases: readonly string[];
-  /** R12 — first-person markers. */
-  pronouns: readonly string[];
+
+  /* Heuristic thresholds the spec does not number. They only ever warn. */
+  /** R4 "short paragraphs": words per paragraph. */
+  summaryMaxParagraphWords: number;
+  /** R4 "uses JD language": minimum JD keywords found in the summary. */
+  summaryMinJdTerms: number;
+  /** R20 "short sentences": words per sentence. */
+  maxSentenceWords: number;
+  /** R19: token similarity at or above which a rewrite is flagged as near-identical. */
+  nearDuplicateSimilarity: number;
 }
 
+export const R18_FILENAME_PATTERN =
+  /^[a-zA-Z0-9\s\-_]+_[a-zA-Z0-9\s\-_]+_[a-zA-Z0-9\s\-_]+\.docx$/;
+
+export const COMPETENCY_LABELS = [
+  'Soft Skills',
+  'Stakeholder Management',
+  'Technical Skills',
+  'Delivery Methodologies',
+  'Security and Compliance',
+  'Business Tools',
+] as const;
+
 export const DEFAULT_RULE_CONFIG: RuleConfig = {
-  filenamePattern:
-    /^[a-zA-Z0-9\s\-_]+_[a-zA-Z0-9\s\-_]+_[a-zA-Z0-9\s\-_]+\.docx$/,
+  filenamePattern: R18_FILENAME_PATTERN,
   roleOverlapThreshold: 0.7,
   roleStopWords: [
     'senior', 'sr', 'lead', 'principal', 'staff', 'junior', 'jr',
     'head', 'chief', 'the', 'of', 'and', 'a', 'an', 'for', 'in', 'at',
     'to', 'with', 'i', 'ii', 'iii', 'iv',
   ],
+  headlineLines: 2,
+  summaryParagraphs: 4,
+  competencyLabels: COMPETENCY_LABELS,
+  minPointsPerRole: 8,
+  minKeywords: 150,
+  targetCompanyCount: 7,
   maxPages: 3,
-  maxGapMonths: 6,
-  bulletsPerRole: { min: 2, max: 6 },
-  maxBulletChars: 220,
-  maxTotalWords: 900,
-  skillsBounds: { min: 8, max: 30 },
   maxRetries: 2,
-  factBank: { requireVerified: true, allowUnverifiedNumbers: false },
   llmScoreFloor: 0.6,
-  bannedPhrases: [
-    'team player', 'hard worker', 'hard-working', 'go-getter', 'synergy',
-    'think outside the box', 'results-driven', 'self-starter', 'detail-oriented',
-    'dynamic', 'guru', 'ninja', 'rockstar', 'wear many hats',
-  ],
-  pronouns: ['i', 'me', 'my', 'mine', 'myself', 'we', 'our', 'ours'],
+  summaryMaxParagraphWords: 70,
+  summaryMinJdTerms: 2,
+  maxSentenceWords: 28,
+  nearDuplicateSimilarity: 0.9,
 };
 
 /* ------------------------------ Rule plumbing ------------------------------ */
 
 export interface RuleContext {
   resume: ResumeDoc;
+  base: BaseSnapshot;
+  jd: JdContext;
+  toggles: RuleToggles;
   factBank: FactBankEntry[];
   config: RuleConfig;
-  /** Target role the run was generated for. */
-  targetRole: string;
   /** Output filename to be validated by R18. */
   fileName: string;
-  /** Stage 8 page count, present only on post-render validation passes. */
-  pageCount?: number;
-  /** Renderer node inventory, present only on post-render passes. */
-  renderedNodes?: RenderNode[];
-  /** Stage 5 judgement payload, optional. */
+  /** Stage 5 contact location override; R1 accepts it in place of the profile city. */
+  contactLocationOverride?: string | null;
+  /** Optional LLM judgement for R9. */
   llmJudgement?: LlmJudgement;
   /** 1-based attempt number. */
   attempt?: number;
@@ -212,7 +274,7 @@ export interface Rule {
   name: string;
   /** Default severity applied to flags this rule emits. */
   severity: Severity;
-  /** Default blocking behaviour. */
+  /** Default blocking behaviour. A non-blocking rule can never block a run. */
   blocking: boolean;
   evaluate(ctx: RuleContext): ValidationFlag[] | Promise<ValidationFlag[]>;
 }

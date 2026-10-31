@@ -114,7 +114,7 @@ export async function runPdfQa(
   const flags: ValidationFlag[] = [];
   if (overflow) {
     flags.push({
-      ruleId: 'R15',
+      ruleId: 'QA',
       code: 'PAGE_OVERFLOW',
       severity: 'warn',
       blocking: false,
