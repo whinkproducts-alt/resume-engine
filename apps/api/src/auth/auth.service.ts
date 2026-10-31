@@ -71,36 +71,90 @@ export class AuthService {
       throw new AppError('INVALID_CREDENTIALS', 401, 'Invalid email or password.');
     }
 
-    const jti = randomUUID();
+    const tokens = await this.issueTokens(user, ip, userAgent);
+
+    if (user.isAdmin) {
+      await this.prisma.adminAction.create({
+        data: {
+          adminId: user.id, action: 'admin.login',
+          ip: ip ?? null, userAgent: userAgent ?? null,
+        },
+      });
+    }
+
+    return { user: await this.me(user.id), ...tokens };
+  }
+
+  /**
+   * Signs an access token and stores a fresh refresh session (the raw token is
+   * returned once; only its SHA-256 is stored).
+   */
+  private async issueTokens(
+    user: { id: string; role: string; isAdmin: boolean },
+    ip?: string,
+    userAgent?: string,
+  ) {
     const accessToken = await this.jwt.signAsync(
-      {
-        sub: user.id,
-        role: user.role,
-        isAdmin: user.isAdmin,
-        jti,
-      },
+      { sub: user.id, role: user.role, isAdmin: user.isAdmin, jti: randomUUID() },
       { expiresIn: ACCESS_TOKEN_TTL_SECONDS },
     );
-
     const refreshToken = randomBytes(32).toString('base64url');
     await this.prisma.session.create({
       data: {
         userId: user.id,
         refreshHash: sha256(refreshToken),
-        userAgent,
-        ip,
-        expiresAt: new Date(
-          Date.now() + REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000,
-        ),
+        userAgent: userAgent ?? null,
+        ip: ip ?? null,
+        expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000),
       },
     });
+    return { accessToken, refreshToken, expiresIn: ACCESS_TOKEN_TTL_SECONDS };
+  }
 
-    return {
-      accessToken,
-      refreshToken,
-      tokenType: 'Bearer',
-      expiresIn: ACCESS_TOKEN_TTL_SECONDS,
-    };
+  /**
+   * POST /auth/refresh. The refresh token is rotated on every use. Presenting a
+   * token that was already rotated means it leaked: every session of that user
+   * is revoked (01-SPEC-v3.md section 3.1).
+   */
+  async refresh(rawToken: string | undefined, ip?: string, userAgent?: string) {
+    if (!rawToken) throw new AppError('UNAUTHORIZED', 401, 'Refresh token required.');
+
+    const session = await this.prisma.session.findFirst({
+      where: { refreshHash: sha256(rawToken) },
+    });
+    if (!session) throw new AppError('UNAUTHORIZED', 401, 'Invalid refresh token.');
+
+    if (session.revokedAt) {
+      await this.prisma.session.updateMany({
+        where: { userId: session.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      throw new AppError('REFRESH_REUSED', 401, 'Refresh token was already used. Sign in again.');
+    }
+    if (session.expiresAt.getTime() < Date.now()) {
+      throw new AppError('UNAUTHORIZED', 401, 'Refresh token expired.');
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { id: session.userId } });
+    if (!user) throw new AppError('UNAUTHORIZED', 401, 'Invalid refresh token.');
+
+    // Compare-and-set: of two concurrent refreshes with the same token, only one wins.
+    const claimed = await this.prisma.session.updateMany({
+      where: { id: session.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    if (claimed.count === 0) throw new AppError('UNAUTHORIZED', 401, 'Invalid refresh token.');
+
+    return this.issueTokens(user, ip, userAgent);
+  }
+
+  /** POST /auth/logout: revokes the session behind this refresh token. Always succeeds. */
+  async logout(rawToken: string | undefined): Promise<void> {
+    if (!rawToken) return;
+    await this.prisma.session.updateMany({
+      where: { refreshHash: sha256(rawToken), revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
   }
 
   async me(userId: string) {

@@ -19,6 +19,7 @@ function matches(row: Row, where: Row = {}): boolean {
       if (Object.keys(o).length === 0) return true;
       return false;
     }
+    if (v === null) return row[k] == null;
     return row[k] === v;
   });
 }
@@ -49,10 +50,14 @@ function table(name: string, fake: FakePrisma) {
   const find = (where?: Row) => rows.find((r) => matches(r, where));
   return {
     rows,
-    findUnique: async (a: { where: Row }) => {
+    findUnique: async (a: { where: Row; select?: Row }) => {
       const [k, v] = Object.entries(a.where)[0] as [string, any];
-      if (v && typeof v === 'object') return rows.find((r) => Object.entries(v).every(([kk, vv]) => r[kk] === vv)) ?? null;
-      return rows.find((r) => r[k] === v) ?? null;
+      const row = v && typeof v === 'object'
+        ? rows.find((r) => Object.entries(v).every(([kk, vv]) => r[kk] === vv))
+        : rows.find((r) => r[k] === v);
+      if (!row) return null;
+      if (!a.select) return row;
+      return Object.fromEntries(Object.keys(a.select).filter((f) => a.select![f]).map((f) => [f, row[f]]));
     },
     findFirst: async (a: { where?: Row; orderBy?: unknown } = {}) =>
       sortRows(rows.filter((r) => matches(r, a.where)), a.orderBy)[0] ?? null,
@@ -83,6 +88,10 @@ function table(name: string, fake: FakePrisma) {
       const created = { id: uid(), createdAt: new Date(), ...a.create };
       rows.push(created);
       return created;
+    },
+    createMany: async (a: { data: Row[] }) => {
+      a.data.forEach((d) => rows.push({ id: uid(), createdAt: new Date(), ...d }));
+      return { count: a.data.length };
     },
     deleteMany: async (a: { where?: Row } = {}) => {
       const keep = rows.filter((r) => !matches(r, a.where));
@@ -123,6 +132,10 @@ export class FakePrisma {
   usageCounter = table('usageCounter', this);
   runCredit = table('runCredit', this);
   adminAction = table('adminAction', this);
+  session = table('session', this);
+  roleEntry = table('roleEntry', this);
+  education = table('education', this);
+  certification = table('certification', this);
   ruleSet = { upsert: async () => ({ id: 'ruleset-1', version: 'v3.1' }) };
   promptVersion = { upsert: async () => ({}) };
 

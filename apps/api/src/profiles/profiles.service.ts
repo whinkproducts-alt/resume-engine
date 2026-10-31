@@ -6,6 +6,12 @@ import { AppError } from '../common/errors/app-error';
 import type { AuthUser } from '../auth/auth.types';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import {
+  toMonthDate,
+  type ReplaceCertsDto,
+  type ReplaceEducationDto,
+  type ReplaceRolesDto,
+} from './dto/roster.dto';
 import { BASE_FILENAME_REGEX } from './profiles.constants';
 
 const PROFILE_LIMITS: Record<UserRole, number | null> = {
@@ -141,6 +147,91 @@ export class ProfilesService {
       });
 
       return base;
+    });
+  }
+
+  /** GET /profiles/:id with the roster the pipeline locks (rules R7 and R13). */
+  async findOne(user: AuthUser, profileId: string) {
+    await this.getOwnedProfile(user, profileId);
+    return this.prisma.profile.findFirst({
+      where: { id: profileId, userId: user.id },
+      include: {
+        settings: true,
+        roles: { orderBy: { orderIndex: 'asc' } },
+        education: { orderBy: [{ startYear: 'desc' }, { institution: 'asc' }] },
+        certs: { orderBy: [{ year: 'desc' }, { name: 'asc' }] },
+        bases: {
+          orderBy: { version: 'desc' },
+          select: { id: true, version: true, fileName: true, isActive: true, uploadedAt: true },
+        },
+      },
+    });
+  }
+
+  /** PUT /profiles/:id/roles replaces the whole roster; array order becomes orderIndex. */
+  async replaceRoles(user: AuthUser, profileId: string, dto: ReplaceRolesDto) {
+    await this.getOwnedProfile(user, profileId);
+    for (const r of dto.roles) {
+      if (r.endDate && toMonthDate(r.endDate) < toMonthDate(r.startDate)) {
+        throw new AppError('INVALID_DATES', 422, `${r.companyName}: endDate is before startDate.`);
+      }
+    }
+    await this.prisma.$transaction([
+      this.prisma.roleEntry.deleteMany({ where: { profileId } }),
+      this.prisma.roleEntry.createMany({
+        data: dto.roles.map((r, i) => ({
+          profileId,
+          companyName: r.companyName,
+          title: r.title,
+          baseTitle: r.baseTitle,
+          startDate: toMonthDate(r.startDate),
+          endDate: r.endDate ? toMonthDate(r.endDate) : null,
+          location: r.location ?? null,
+          orderIndex: i,
+          baseBullets: r.baseBullets,
+          baseFlagship: r.baseFlagship ?? null,
+        })),
+      }),
+    ]);
+    return this.prisma.roleEntry.findMany({ where: { profileId }, orderBy: { orderIndex: 'asc' } });
+  }
+
+  async replaceEducation(user: AuthUser, profileId: string, dto: ReplaceEducationDto) {
+    await this.getOwnedProfile(user, profileId);
+    await this.prisma.$transaction([
+      this.prisma.education.deleteMany({ where: { profileId } }),
+      this.prisma.education.createMany({
+        data: dto.education.map((e) => ({
+          profileId, institution: e.institution, degree: e.degree,
+          field: e.field ?? null, startYear: e.startYear, endYear: e.endYear ?? null,
+        })),
+      }),
+    ]);
+    return this.prisma.education.findMany({ where: { profileId } });
+  }
+
+  async replaceCerts(user: AuthUser, profileId: string, dto: ReplaceCertsDto) {
+    await this.getOwnedProfile(user, profileId);
+    await this.prisma.$transaction([
+      this.prisma.certification.deleteMany({ where: { profileId } }),
+      this.prisma.certification.createMany({
+        data: dto.certs.map((c) => ({
+          profileId, name: c.name, issuer: c.issuer ?? null, year: c.year ?? null,
+        })),
+      }),
+    ]);
+    return this.prisma.certification.findMany({ where: { profileId } });
+  }
+
+  /** PATCH /profiles/:id/bases/:baseId/activate */
+  async activateBase(user: AuthUser, profileId: string, baseId: string) {
+    await this.getOwnedProfile(user, profileId);
+    const base = await this.prisma.baseResume.findFirst({ where: { id: baseId, profileId } });
+    if (!base) throw new AppError('BASE_RESUME_NOT_FOUND', 404);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.baseResume.updateMany({ where: { profileId, isActive: true }, data: { isActive: false } });
+      await tx.profile.update({ where: { id: profileId }, data: { activeBaseId: baseId } });
+      return tx.baseResume.update({ where: { id: baseId }, data: { isActive: true } });
     });
   }
 
