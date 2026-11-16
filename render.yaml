@@ -67,7 +67,11 @@ services:
       - key: ADMIN_SEED_PASSWORD
         sync: false
       - key: LLM_PROVIDER
-        value: openai
+        value: omniroute
+      - key: LLM_BASE_URL
+        value: https://api.omniroute.ai/v1
+      - key: LLM_API_KEY
+        sync: false
       - key: LLM_MODEL_ANALYZE
         sync: false
       - key: LLM_MODEL_WRITE
@@ -103,7 +107,9 @@ services:
           name: resume-engine-redis
           property: connectionString
       - key: LLM_PROVIDER
-        value: openai
+        value: omniroute
+      - key: LLM_BASE_URL
+        value: https://api.omniroute.ai/v1
       - key: LLM_API_KEY
         sync: false
       - key: LLM_MODEL_ANALYZE
