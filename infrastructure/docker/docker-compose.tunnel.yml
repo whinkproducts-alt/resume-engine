@@ -1,0 +1,12 @@
+# Public HTTPS with no domain and no open ports: Cloudflare quick tunnel -> web.
+# Used on a free Oracle VM (or any machine). Caddy is not started in this mode.
+#   docker compose --env-file .env.production -f docker-compose.prod.yml -f docker-compose.tunnel.yml \
+#     up -d --build web api worker postgres redis cloudflared
+#   docker compose -f docker-compose.prod.yml -f docker-compose.tunnel.yml logs cloudflared | grep trycloudflare
+# shortcut: quick tunnel URL changes whenever cloudflared restarts; use a named tunnel + domain to make it stable.
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://web:3000
+    depends_on: [web]
