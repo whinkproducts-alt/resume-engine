@@ -47,6 +47,16 @@ describe('pipeline: happy path (real validator, renderer and LibreOffice)', () =
     expect(repo.logs.filter((l) => l.status === 'error')).toEqual([]);
   }, 120_000);
 
+  it('ships the DOCX only when pdf is off (no LibreOffice, no PDF)', async () => {
+    const { repo, store, env } = setup();
+    expect(await runPipeline({ ...env, pdf: false }, { runId: 'run_test_1' })).toBe('COMPLETE');
+    expect(repo.statuses).not.toContain('EXPORTING_PDF');
+    expect(repo.completion?.pdfKey).toBeNull();
+    expect(repo.completion?.pageCount).toBeNull();
+    expect(repo.completion?.docxKey).toMatch(/\.docx$/);
+    expect(store.puts.some((p) => p.key.endsWith('.pdf'))).toBe(false);
+  }, 120_000);
+
   it('applies the contact location override to the header city only', async () => {
     const { repo, env } = setup({}, {});
     repo.ctx.run.contactLocationOverride = 'London, UK';

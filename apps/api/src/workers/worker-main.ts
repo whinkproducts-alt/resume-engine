@@ -30,6 +30,7 @@ export async function startWorker(): Promise<{ close: () => Promise<void> }> {
     models,
     store: storeFromEnv(),
     config: ruleConfigFromEnv(),
+    pdf: process.env.PDF_EXPORT !== 'false',
     ...(process.env.SOFFICE_PATH ? { sofficePath: process.env.SOFFICE_PATH } : {}),
   };
 

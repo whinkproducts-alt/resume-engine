@@ -36,13 +36,15 @@ export interface PipelineDeps {
   regenerate: RegenerateFn;
   onValidation?: (runId: string, result: ValidationResult) => Promise<void>;
   onArtifacts?: (runId: string, artifacts: {
-    docxKey: string; pdfKey: string; pageCount: number;
-    docxSize: number; pdfSize: number;
+    docxKey: string; pdfKey: string | null; pageCount: number | null;
+    docxSize: number; pdfSize: number | null;
   }) => Promise<void>;
   /** Called as the run moves into Stage 7 and Stage 8, so the caller can update Run.status. */
   onStage?: (stage: 'RENDERING' | 'EXPORTING_PDF') => Promise<void>;
   /** Overrides the LibreOffice binary path (defaults to SOFFICE_PATH / PATH lookup). */
   sofficePath?: string;
+  /** Default true. False ships the DOCX only: no LibreOffice, no PDF, no page-count QA. */
+  pdf?: boolean;
 }
 
 export interface Stage6to8Input {
@@ -123,40 +125,41 @@ export async function runStages6to8(
 
   /* ------------------------------ Stage 8 ------------------------------- */
 
-  await deps.onStage?.('EXPORTING_PDF');
-  const qa = await runPdfQa(docx, {
-    maxPages: config.maxPages,
-    runId: input.runId,
-    ...(deps.sofficePath ? { sofficePath: deps.sofficePath } : {}),
-  });
-
   const keys = artifactKeys(input.runId, slugifyFileName(input.fileName));
+  const docxRef = await deps.store.put(keys.docx, docx,
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    { runId: input.runId, attempt: String(retry.attempts) });
 
-  const [docxRef, pdfRef] = await Promise.all([
-    deps.store.put(keys.docx, docx,
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      { runId: input.runId, attempt: String(retry.attempts) }),
-    deps.store.put(keys.pdf, qa.pdf, 'application/pdf',
-      { runId: input.runId, pages: String(qa.pageCount) }),
-  ]);
+  let pdfRef: ArtifactRef | null = null;
+  let qa: Awaited<ReturnType<typeof runPdfQa>> | null = null;
+  if (deps.pdf !== false) {
+    await deps.onStage?.('EXPORTING_PDF');
+    qa = await runPdfQa(docx, {
+      maxPages: config.maxPages,
+      runId: input.runId,
+      ...(deps.sofficePath ? { sofficePath: deps.sofficePath } : {}),
+    });
+    pdfRef = await deps.store.put(keys.pdf, qa.pdf, 'application/pdf',
+      { runId: input.runId, pages: String(qa.pageCount) });
+  }
 
   await deps.store.put(
     keys.validation,
     Buffer.from(JSON.stringify({
       validation: retry.result,
-      qaFlags: qa.flags,
-      pageCount: qa.pageCount,
-      overflow: qa.overflow,
+      qaFlags: qa?.flags ?? [],
+      pageCount: qa?.pageCount ?? null,
+      overflow: qa?.overflow ?? null,
     }, null, 2)),
     'application/json',
   );
 
   await deps.onArtifacts?.(input.runId, {
     docxKey: docxRef.key,
-    pdfKey: pdfRef.key,
-    pageCount: qa.pageCount,
+    pdfKey: pdfRef?.key ?? null,
+    pageCount: qa?.pageCount ?? null,
     docxSize: docxRef.size,
-    pdfSize: pdfRef.size,
+    pdfSize: pdfRef?.size ?? null,
   });
 
   return {
@@ -165,10 +168,10 @@ export async function runStages6to8(
     requiresHumanReview: false,
     resume,
     docxKey: docxRef.key,
-    pdfKey: pdfRef.key,
+    pdfKey: pdfRef?.key ?? null,
     docxSize: docxRef.size,
-    pdfSize: pdfRef.size,
-    pageCount: qa.pageCount,
-    qaFlags: qa.flags,
+    pdfSize: pdfRef?.size ?? null,
+    pageCount: qa?.pageCount ?? null,
+    qaFlags: qa?.flags ?? [],
   };
 }
