@@ -4,7 +4,7 @@ import {
   ALL_RULES,
   DEFAULT_RULE_CONFIG,
   DEFAULT_TOGGLES,
-  RuleValidator,
+  validateRules,
   runWithRetry,
   tokenOverlap,
   type BaseSnapshot,
@@ -141,7 +141,7 @@ describe('baseline', () => {
   });
 
   it('a well formed resume has no blocking failures', async () => {
-    const result = await new RuleValidator().validate(ctxFor());
+    const result = await validateRules(ctxFor());
     expect(result.blockingFailures).toEqual([]);
     expect(result.passed).toBe(true);
   });
@@ -421,7 +421,7 @@ describe('non-blocking rules (Victor sign-off)', () => {
       id: 'R10', name: 'rogue', severity: 'warn', blocking: false,
       evaluate: () => [{ ruleId: 'R10', code: 'X', severity: 'error', blocking: true, message: 'm' }],
     };
-    const result = await new RuleValidator().override(rogue).validate(ctxFor());
+    const result = await validateRules(ctxFor(), DEFAULT_RULE_CONFIG, [rogue, ...ALL_RULES]);
     const f = result.flags.find((x) => x.code === 'X');
     expect(f?.blocking).toBe(false);
     expect(result.passed).toBe(true);
@@ -432,7 +432,7 @@ describe('non-blocking rules (Victor sign-off)', () => {
       id: 'R2', name: 'boom', severity: 'error', blocking: true,
       evaluate: () => { throw new Error('kaput'); },
     };
-    const result = await new RuleValidator().override(boom).validate(ctxFor());
+    const result = await validateRules(ctxFor(), DEFAULT_RULE_CONFIG, [boom, ...ALL_RULES]);
     expect(result.passed).toBe(false);
     expect(codes(result.blockingFailures)).toContain('RULE_EXECUTION_ERROR');
   });
@@ -444,7 +444,6 @@ describe('runWithRetry', () => {
   const baseOpts = () => {
     const c = ctxFor();
     return {
-      validator: new RuleValidator(),
       base: c.base, jd: c.jd, toggles: c.toggles, factBank: c.factBank,
       fileName: c.fileName,
     };
@@ -454,11 +453,15 @@ describe('runWithRetry', () => {
     const broken = resume();
     broken.headline = ['ONLY ONE LINE'];
     let calls = 0;
-    const out = await runWithRetry({
-      ...baseOpts(),
-      initialResume: broken,
-      regenerate: async () => { calls++; return resume(); },
-    });
+    const out = await runWithRetry(
+      broken,
+      baseOpts().base,
+      baseOpts().jd,
+      baseOpts().toggles,
+      baseOpts().factBank,
+      baseOpts().fileName,
+      async () => { calls++; return resume(); },
+    );
     expect(calls).toBe(1);
     expect(out.attempts).toBe(2);
     expect(out.exhausted).toBe(false);
@@ -468,11 +471,15 @@ describe('runWithRetry', () => {
     const broken = resume();
     broken.headline = ['ONLY ONE LINE'];
     let calls = 0;
-    const out = await runWithRetry({
-      ...baseOpts(),
-      initialResume: broken,
-      regenerate: async () => { calls++; return broken; },
-    });
+    const out = await runWithRetry(
+      broken,
+      baseOpts().base,
+      baseOpts().jd,
+      baseOpts().toggles,
+      baseOpts().factBank,
+      baseOpts().fileName,
+      async () => { calls++; return broken; },
+    );
     expect(calls).toBe(2);
     expect(out.attempts).toBe(3);
     expect(out.exhausted).toBe(true);

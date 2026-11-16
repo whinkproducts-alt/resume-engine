@@ -19,8 +19,6 @@ export interface ValidationFlag {
   meta?: Record<string, unknown>;
 }
 
-export type Flag = ValidationFlag;
-
 /* ------------------------------- Resume model ------------------------------ */
 
 /** R1: the header block is copied byte-for-byte from the profile. */

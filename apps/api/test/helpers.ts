@@ -114,7 +114,7 @@ export class ScriptedLlm implements LlmClient {
     this.calls[name] = (this.calls[name] ?? 0) + 1;
     this.requests.push(req);
     const n = this.calls[name] ?? 1;
-    return { data: this.data(name, n), tokensIn: 10, tokensOut: 5, model: req.model };
+    return { data: this.data(name, n), tokensIn: 10, tokensOut: 5, model: req.model, provider: 'test' };
   }
 
   private data(name: string, n: number): unknown {

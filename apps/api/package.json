@@ -16,6 +16,7 @@
     "dev": "nest start --watch"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
     "@aws-sdk/client-s3": "^3.637.0",
     "@nestjs/common": "^10.4.0",
     "@nestjs/config": "^3.2.3",
@@ -44,23 +45,23 @@
     "qrcode": "^1.5.4",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "zod": "^3.23.8"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.0",
     "@nestjs/schematics": "^10.1.0",
+    "@nestjs/testing": "^10.4.0",
+    "@swc/core": "^1.7.0",
     "@types/express": "^4.17.21",
     "@types/multer": "^1.4.12",
     "@types/node": "^22.5.0",
     "@types/pdf-parse": "^1.1.4",
     "@types/qrcode": "^1.5.5",
-    "prisma": "^5.22.0",
-    "typescript": "^5.5.4",
-    "vitest": "^2.0.5",
-    "@nestjs/testing": "^10.4.0",
-    "supertest": "^7.0.0",
     "@types/supertest": "^6.0.2",
+    "prisma": "^5.22.0",
+    "supertest": "^7.0.0",
+    "typescript": "^5.5.4",
     "unplugin-swc": "^1.5.1",
-    "@swc/core": "^1.7.0"
+    "vitest": "^2.0.5"
   }
 }

@@ -4,7 +4,6 @@
 
 import {
   DEFAULT_RULE_CONFIG,
-  RuleValidator,
   runWithRetry,
   type BaseSnapshot,
   type FactBankEntry,
@@ -32,7 +31,6 @@ export interface ArtifactSink {
 }
 
 export interface PipelineDeps {
-  validator?: RuleValidator;
   config?: RuleConfig;
   store: ArtifactSink;
   regenerate: RegenerateFn;
@@ -82,26 +80,24 @@ export async function runStages6to8(
   deps: PipelineDeps,
 ): Promise<Stage6to8Output> {
   const config = deps.config ?? DEFAULT_RULE_CONFIG;
-  const validator = deps.validator ?? new RuleValidator(config);
 
   /* ------------------------------ Stage 6 ------------------------------- */
 
-  const retry = await runWithRetry({
-    validator,
-    initialResume: input.resume,
-    base: input.base,
-    jd: input.jd,
-    toggles: input.toggles,
-    factBank: input.factBank,
-    fileName: input.fileName,
-    contactLocationOverride: input.contactLocationOverride ?? null,
-    ...(input.llmJudgement ? { llmJudgement: input.llmJudgement } : {}),
-    regenerate: deps.regenerate,
+  const retry = await runWithRetry(
+    input.resume,
+    input.base,
+    input.jd,
+    input.toggles,
+    input.factBank,
+    input.fileName,
+    deps.regenerate,
     config,
-    onAttempt: async (_attempt, result) => {
+    input.llmJudgement,
+    input.contactLocationOverride ?? null,
+    async (attempt, result) => {
       await deps.onValidation?.(input.runId, result);
     },
-  });
+  );
 
   if (retry.exhausted) {
     // Blocking failures survived the retry budget: do not ship an ungrounded file.
