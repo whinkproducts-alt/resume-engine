@@ -40,4 +40,9 @@ export class CreateProfileDto {
   @IsOptional()
   @IsBoolean()
   isDefault?: boolean;
+
+  /** false = this profile's runs produce the Word file only (no PDF). */
+  @IsOptional()
+  @IsBoolean()
+  exportPdf?: boolean;
 }

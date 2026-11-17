@@ -34,6 +34,7 @@ export interface Profile {
   headerEmail: string;
   linkedIn: string | null;
   isDefault: boolean;
+  exportPdf: boolean;
   activeBaseId: string | null;
 }
 

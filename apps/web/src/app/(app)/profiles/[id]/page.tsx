@@ -24,8 +24,10 @@ export default function ProfileDetailPage() {
   });
 
   const [form, setForm] = useState({ name: "", headerFullName: "", headerCity: "", phones: "", headerEmail: "", linkedIn: "" });
+  const [exportPdf, setExportPdf] = useState(true);
   useEffect(() => {
     if (!profile) return;
+    setExportPdf(profile.exportPdf);
     setForm({
       name: profile.name, headerFullName: profile.headerFullName, headerCity: profile.headerCity,
       phones: profile.headerPhones.join(", "), headerEmail: profile.headerEmail, linkedIn: profile.linkedIn ?? "",
@@ -39,6 +41,7 @@ export default function ProfileDetailPage() {
       name: form.name.trim(), headerFullName: form.headerFullName.trim(), headerCity: form.headerCity.trim(),
       headerPhones: parsePhones(form.phones), headerEmail: form.headerEmail.trim(),
       linkedIn: form.linkedIn.trim() || undefined,
+      exportPdf,
     }),
     onSuccess: refresh,
   });
@@ -90,6 +93,10 @@ export default function ProfileDetailPage() {
           <Input type="email" placeholder="Email" value={form.headerEmail} onChange={set("headerEmail")} />
           <Input placeholder="LinkedIn" value={form.linkedIn} onChange={set("linkedIn")} />
         </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={exportPdf} onChange={(e) => setExportPdf(e.target.checked)} />
+          Also export a PDF (off = Word file only)
+        </label>
         <div className="flex items-center justify-between">
           <p className={"text-xs " + (save.isError ? "text-danger" : "text-success")}>
             {save.isError ? errMsg(save.error) : save.isSuccess ? "Saved" : ""}

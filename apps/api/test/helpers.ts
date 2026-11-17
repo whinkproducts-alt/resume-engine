@@ -28,6 +28,7 @@ export function fixtureContext(over: Partial<RunContext> = {}): RunContext {
       phones: ['+234 800 000 0000'],
       email: 'jane@example.com',
       linkedIn: 'linkedin.com/in/janedoe',
+      exportPdf: true,
       roles: [
         { company: 'Acme', baseTitle: 'Engineering Manager', startDate: '2020-01', endDate: null,
           location: 'Lagos', baseFlagship: 'Led the platform team', baseBullets: ['Built the billing service'] },

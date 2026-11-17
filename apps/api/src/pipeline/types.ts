@@ -68,6 +68,7 @@ export interface ProfileRecord {
   phones: string[];
   email: string;
   linkedIn: string | null;
+  exportPdf: boolean;
   roles: RosterRole[];
   education: BaseSnapshot['education'];
   certifications: BaseSnapshot['certifications'];

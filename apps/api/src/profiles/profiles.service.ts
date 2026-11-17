@@ -59,6 +59,7 @@ export class ProfilesService {
           headerEmail: dto.headerEmail,
           linkedIn: dto.linkedIn ?? null,
           isDefault,
+          exportPdf: dto.exportPdf ?? true,
         },
       });
     });
@@ -82,6 +83,7 @@ export class ProfilesService {
     if (dto.headerPhones !== undefined) data.headerPhones = dto.headerPhones;
     if (dto.headerEmail !== undefined) data.headerEmail = dto.headerEmail;
     if (dto.linkedIn !== undefined) data.linkedIn = dto.linkedIn;
+    if (dto.exportPdf !== undefined) data.exportPdf = dto.exportPdf;
 
     return this.prisma.$transaction(async (tx) => {
       if (dto.isDefault === true) {

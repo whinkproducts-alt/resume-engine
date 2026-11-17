@@ -116,6 +116,7 @@ export class PrismaPipelineRepo implements PipelineRepo {
         phones: profile.headerPhones,
         email: profile.headerEmail,
         linkedIn: profile.linkedIn,
+        exportPdf: profile.exportPdf,
         roles: profile.roles.map((r) => ({
           company: r.companyName,
           baseTitle: r.baseTitle,

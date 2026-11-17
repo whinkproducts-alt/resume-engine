@@ -57,6 +57,14 @@ describe('pipeline: happy path (real validator, renderer and LibreOffice)', () =
     expect(store.puts.some((p) => p.key.endsWith('.pdf'))).toBe(false);
   }, 120_000);
 
+  it('ships the DOCX only for a profile with exportPdf off', async () => {
+    const { repo, store, env } = setup();
+    repo.ctx.profile.exportPdf = false;
+    expect(await runPipeline(env, { runId: 'run_test_1' })).toBe('COMPLETE');
+    expect(repo.completion?.pdfKey).toBeNull();
+    expect(store.puts.some((p) => p.key.endsWith('.pdf'))).toBe(false);
+  }, 120_000);
+
   it('applies the contact location override to the header city only', async () => {
     const { repo, env } = setup({}, {});
     repo.ctx.run.contactLocationOverride = 'London, UK';

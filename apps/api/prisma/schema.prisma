@@ -121,6 +121,7 @@ model Profile {
   headerEmail    String
   linkedIn       String?
   isDefault      Boolean  @default(false)
+  exportPdf      Boolean  @default(true)
   activeBaseId   String?
   user           User     @relation(fields: [userId], references: [id])
   bases          BaseResume[]

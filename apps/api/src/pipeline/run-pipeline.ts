@@ -38,7 +38,7 @@ export interface PipelineEnv {
   store: ArtifactSink;
   config?: RuleConfig;
   sofficePath?: string;
-  /** False = DOCX only (see PDF_EXPORT). Default true. */
+  /** False = DOCX only for every profile (PDF_EXPORT=false); otherwise each profile's exportPdf decides. */
   pdf?: boolean;
   now?: () => Date;
 }
@@ -201,7 +201,7 @@ export async function runPipeline(env: PipelineEnv, job: RunJobData): Promise<Pi
         store: env.store,
         config: env.config ?? DEFAULT_RULE_CONFIG,
         ...(env.sofficePath ? { sofficePath: env.sofficePath } : {}),
-        ...(env.pdf === false ? { pdf: false } : {}),
+        ...(env.pdf === false || !ctx.profile.exportPdf ? { pdf: false } : {}),
         regenerate: async (attempt, flags) => {
           sections = await gen.regenerate(sections, flags, attempt);
           resume = assemble(ctx, sections, company, now());

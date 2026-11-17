@@ -50,7 +50,8 @@ export default function ReviewRunPage() {
         {exported ? (
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => void openArtifact(id, "docx")}><Download size={14} /> DOCX</Button>
-            <Button variant="outline" onClick={() => void openArtifact(id, "pdf")}><Download size={14} /> PDF</Button>
+            {/* pageCount is only set when a PDF was produced */}
+            {run.data?.pageCount ? <Button variant="outline" onClick={() => void openArtifact(id, "pdf")}><Download size={14} /> PDF</Button> : null}
           </div>
         ) : (
           <Badge tone="fail">Not exported</Badge>
