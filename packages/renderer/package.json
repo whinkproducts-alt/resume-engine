@@ -4,7 +4,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "dependencies": {
-    "docx": "^8.5.0",
+    "docx": "^9.15.0",
     "@resume-engine/rules": "workspace:*"
   },
   "devDependencies": {
